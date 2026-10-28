@@ -57,6 +57,50 @@ body{background:radial-gradient(ellipse at 50% -15%,#fff 0,transparent 52%),var(
 @media(max-width:700px){.wrap{padding:18px 13px 36px}.top{margin-bottom:20px}.brand{font-size:21px}.hero{padding:25px 21px;border-radius:23px}.hero h1{font-size:34px;letter-spacing:-1.4px}.hero:after{width:180px;height:180px;right:-95px;top:-55px}.tool{padding:20px;border-radius:19px}.pill{display:none}.grid{gap:13px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 
+
+/* App navigation layout */
+body{min-height:100vh}
+.app-shell{min-height:100vh;display:grid;grid-template-columns:244px minmax(0,1fr);align-items:stretch}
+.sidebar{position:sticky;top:0;height:100vh;padding:26px 14px 18px 18px;background:rgba(250,250,252,.82);border-right:1px solid rgba(29,29,31,.08);backdrop-filter:blur(24px);display:flex;flex-direction:column;gap:24px;z-index:5}
+.side-brand{display:flex;align-items:center;gap:11px;padding:0 8px}
+.side-brand .logo{flex:0 0 40px;width:40px;height:40px;margin:0;font-size:19px}
+.side-brand .brand{font-size:20px;line-height:1.1}
+.side-brand .sub{font-size:11px;margin-top:4px}
+.nav-caption{padding:0 12px;color:#98989d;text-transform:uppercase;font-size:10px;letter-spacing:.1em;font-weight:700;margin-bottom:7px}
+.side-nav{display:flex;flex-direction:column;gap:4px}
+.nav-item{width:100%;display:flex;align-items:center;gap:12px;border:0;border-radius:11px;background:transparent;color:#515156;text-align:left;padding:11px 12px;font:600 13px/1.2 inherit;cursor:pointer;transition:background .15s,color .15s}
+.nav-item .nav-icon{width:21px;text-align:center;font-size:17px;color:#77777d}
+.nav-item:hover{background:#ededf0}
+.nav-item.active{background:#e6f1ff;color:#0066cc}
+.nav-item.active .nav-icon{color:#0071e3}
+.sidebar-bottom{margin-top:auto;padding:13px 12px;border-top:1px solid rgba(29,29,31,.08);font-size:11px;color:#86868b;line-height:1.6}
+.app-content{min-width:0;padding:0 clamp(20px,3.2vw,48px) 34px}
+.app-content .wrap{max-width:1120px;margin:0 auto;padding:28px 0 20px}
+.app-content .top{margin-bottom:22px}
+.app-content .pill{display:block}
+.page-view{display:none;animation:pageIn .2s ease}
+.page-view.active{display:block}
+.page-view .tool{margin-top:0}
+.page-view .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.page-heading{margin:5px 0 22px}
+.page-heading h1{font-size:clamp(27px,3.2vw,36px);line-height:1.15;letter-spacing:-1.4px;margin:0 0 7px;font-weight:720}
+.page-heading p{margin:0;color:var(--muted);font-size:14px}
+.home-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-top:20px}
+.shortcut{display:flex;align-items:center;gap:12px;text-align:left;padding:17px;background:rgba(255,255,255,.8);border:1px solid rgba(29,29,31,.08);border-radius:17px;cursor:pointer;color:var(--ink);font:inherit;transition:transform .15s,box-shadow .15s}
+.shortcut:hover{transform:translateY(-2px);box-shadow:0 8px 22px #1d1d1f0a}
+.shortcut .icon{flex:0 0 40px;width:40px;height:40px;margin:0}
+.shortcut strong{display:block;font-size:12px;line-height:1.35}
+.shortcut small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+#page-home .hero{margin-bottom:0}
+#page-home .hero h1{max-width:620px}
+#page-home .privacy{margin-top:20px}
+.app-content .note{margin-top:22px}
+.app-content .foot{text-align:left;border-top:1px solid rgba(29,29,31,.08);padding-top:16px}
+@keyframes pageIn{from{opacity:.65;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:900px){.app-shell{grid-template-columns:205px minmax(0,1fr)}.sidebar{padding:22px 10px}.app-content{padding:0 22px 28px}.home-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.app-shell{display:block;padding-bottom:70px}.sidebar{position:fixed;top:auto;bottom:0;left:0;right:0;width:100%;height:auto;padding:7px 8px calc(7px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid rgba(29,29,31,.1);display:block;background:rgba(250,250,252,.92)}.side-brand,.nav-caption,.sidebar-bottom{display:none}.side-nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}.nav-item{flex-direction:column;justify-content:center;gap:4px;padding:7px 2px;border-radius:10px;font-size:10px;white-space:nowrap}.nav-item .nav-icon{font-size:18px;width:auto}.app-content{padding:0 14px 24px}.app-content .wrap{padding:18px 0 18px}.app-content .top{margin-bottom:18px}.app-content .pill{display:none}.page-view .grid{grid-template-columns:1fr}.home-shortcuts{grid-template-columns:1fr;gap:9px}.shortcut{padding:13px}.page-heading{margin-bottom:17px}.page-heading h1{font-size:29px}.hero h1{font-size:33px;letter-spacing:-1.3px}.app-content .note{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.page-view{animation:none}.shortcut{transition:none}}
+
 </style>
 </head>
 <body>
@@ -80,7 +124,41 @@ body{background:radial-gradient(ellipse at 50% -15%,#fff 0,transparent 52%),var(
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 (() => {
+
 const $ = id => document.getElementById(id);
+function setupNavigation(){
+ const root=document.querySelector('.wrap');
+ const header=root.querySelector('.top'),hero=root.querySelector('.hero'),toolsGrid=root.querySelector('#merge').parentElement;
+ const ocr=$('ocr'),scanner=$('scanner'),note=root.querySelector('.note'),foot=root.querySelector('.foot');
+ const shell=document.createElement('div');shell.className='app-shell';
+ const sidebar=document.createElement('aside');sidebar.className='sidebar';sidebar.setAttribute('aria-label','Главная навигация');
+ sidebar.innerHTML='<div class="side-brand"><div class="logo">▣</div><div><div class="brand">DocuDesk</div><div class="sub">Рабочее пространство</div></div></div><div><div class="nav-caption">Рабочее пространство</div><nav class="side-nav" aria-label="Разделы"><button class="nav-item active" data-page="home"><span class="nav-icon">⌂</span><span>Главная</span></button><button class="nav-item" data-page="pdf"><span class="nav-icon">▤</span><span>PDF-инструменты</span></button><button class="nav-item" data-page="ocr"><span class="nav-icon">Aa</span><span>Распознавание</span></button><button class="nav-item" data-page="scanner"><span class="nav-icon">▧</span><span>Сканирование</span></button><button class="nav-item" data-page="about"><span class="nav-icon">ⓘ</span><span>О приложении</span></button></nav></div><div class="sidebar-bottom">DocuDesk Web · 0.2<br>Документы остаются на вашем устройстве</div>';
+ const content=document.createElement('div');content.className='app-content';
+ const inner=document.createElement('div');inner.className='wrap';
+ const appHeader=header;appHeader.querySelector('.sub').textContent='Простая работа с документами';
+ inner.appendChild(appHeader);
+ const home=document.createElement('section');home.className='page-view active';home.id='page-home';
+ hero.querySelector('h1').textContent='Документы. Без лишних движений.';
+ hero.querySelector('p').textContent='Все инструменты для PDF, сканирования и распознавания текста — в одном аккуратном рабочем пространстве.';
+ home.appendChild(hero);
+ const shortcuts=document.createElement('div');shortcuts.className='home-shortcuts';
+ shortcuts.innerHTML='<button class="shortcut" data-go="pdf"><span class="icon">▤</span><span><strong>PDF-инструменты</strong><small>Объединение и конвертация</small></span></button><button class="shortcut" data-go="ocr"><span class="icon">Aa</span><span><strong>Распознать текст</strong><small>OCR для сканов и фото</small></span></button><button class="shortcut" data-go="scanner"><span class="icon">▧</span><span><strong>Сканирование</strong><small>Проверка сетевого сканера</small></span></button>';
+ home.appendChild(shortcuts);
+ const pdfPage=document.createElement('section');pdfPage.className='page-view';pdfPage.id='page-pdf';pdfPage.innerHTML='<div class="page-heading"><h1>PDF-инструменты</h1><p>Объединяйте, разделяйте и конвертируйте документы.</p></div>';
+ while(toolsGrid.firstChild)pdfPage.appendChild(toolsGrid.firstChild);
+ const ocrPage=document.createElement('section');ocrPage.className='page-view';ocrPage.id='page-ocr';ocrPage.innerHTML='<div class="page-heading"><h1>Распознавание текста</h1><p>Извлекайте текст из сканов, фотографий и PDF.</p></div>';ocrPage.appendChild(ocr);
+ const scannerPage=document.createElement('section');scannerPage.className='page-view';scannerPage.id='page-scanner';scannerPage.innerHTML='<div class="page-heading"><h1>Сканирование</h1><p>Проверьте совместимость сетевого сканера с eSCL / AirScan.</p></div>';scannerPage.appendChild(scanner);
+ const aboutPage=document.createElement('section');aboutPage.className='page-view';aboutPage.id='page-about';aboutPage.innerHTML='<div class="page-heading"><h1>О DocuDesk</h1><p>Минималистичные инструменты для повседневной работы с документами.</p></div><section class="tool"><div class="icon">✓</div><h2>Конфиденциальность</h2><p>Обработка PDF и OCR выполняется в вашем браузере. Файлы не отправляются на сервер DocuDesk.</p><h2 style="margin-top:20px">Поддерживаемые операции</h2><p>Объединение и разделение PDF, изображения в PDF, экспорт страниц в изображения, распознавание текста и предварительная проверка совместимости сетевого сканера.</p><p style="margin-top:18px">Для работы используются PDF.js, pdf-lib, JSZip и Tesseract.js с CDN, поэтому требуется подключение к интернету.</p></section>';
+ inner.append(home,pdfPage,ocrPage,scannerPage,aboutPage);
+ if(note)inner.appendChild(note);if(foot)inner.appendChild(foot);
+ content.appendChild(inner);shell.append(sidebar,content);root.replaceWith(shell);
+ function navigate(page){document.querySelectorAll('.page-view').forEach(el=>el.classList.toggle('active',el.id==='page-'+page));document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));if(history.replaceState)history.replaceState(null,'','#'+page);window.scrollTo({top:0,behavior:'smooth'});}
+ sidebar.querySelectorAll('[data-page]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.page)));
+ home.querySelectorAll('[data-go]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.go)));
+ document.querySelectorAll('[data-page-link]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.pageLink)));
+ const initial=location.hash.slice(1);if(['home','pdf','ocr','scanner','about'].includes(initial))navigate(initial);
+}
+setupNavigation();
 const state = {merge:[],split:[],imgpdf:[],pdfimg:[],ocr:[]}; let selectedMergeIndex=-1;
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const fmt = n => n < 1024 ? n+' B' : n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB';
