@@ -1,0 +1,59 @@
+
+name: Build DocuDesk for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          python -m pytest
+
+      - name: Build application
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed `
+            --name DocuDesk `
+            --collect-all fitz `
+            -m docudesk.main
+
+      - name: Package portable version
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path dist/DocuDesk/* `
+            -DestinationPath DocuDesk-Portable.zip
+
+      - name: Upload build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: DocuDesk-Windows-builds
+          path: |
+            dist/DocuDesk/
+            DocuDesk-Portable.zip
