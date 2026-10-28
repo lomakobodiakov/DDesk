@@ -40,6 +40,7 @@ jobs:
             --name DocuDesk `
             --paths src `
             --collect-all fitz `
+            --collect-all pymupdf `
             --collect-all PySide6 `
             --collect-all PIL `
             --hidden-import win32com.client `
