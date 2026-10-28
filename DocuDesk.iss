@@ -10,7 +10,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\DocuDesk
 DefaultGroupName=DocuDesk
-OutputDir=..\installer
+OutputDir=installer
 OutputBaseFilename=DocuDesk-Setup
 Compression=lzma2
 SolidCompression=yes
@@ -21,7 +21,7 @@ ArchitecturesInstallIn64BitMode=x64
 Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Дополнительные значки:"; Flags: unchecked
 
 [Files]
-Source: "..\dist\DocuDesk\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\DocuDesk\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\DocuDesk"; Filename: "{app}\{#MyAppExeName}"
