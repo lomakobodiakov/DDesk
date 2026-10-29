@@ -9,6 +9,10 @@ It is intentionally not a general-purpose HTTP proxy.
 import base64
 import http.client
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +29,7 @@ SCAN_JOBS_PATH = "/eSCL/ScanJobs"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SCAN_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_SCAN_PAGES = 20
+MAX_CONVERT_BYTES = 80 * 1024 * 1024
 ALLOWED_SOURCES = {"Platen", "Feeder"}
 ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
 ALLOWED_RESOLUTIONS = {150, 300, 600}
@@ -225,11 +230,73 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(404, {"ok": False, "error": "Not found"})
 
+    def _read_upload(self) -> tuple[str, bytes]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length < 1 or length > MAX_CONVERT_BYTES:
+            raise ScannerError("Размер файла должен быть не более 80 МБ.")
+        filename = self.headers.get("X-Filename", "document.bin")
+        filename = os.path.basename(filename.replace("\\", "/"))
+        if not filename or filename in (".", ".."):
+            filename = "document.bin"
+        return filename, self.rfile.read(length)
+
+    def _run_office_conversion(self, filename: str, data: bytes, output_ext: str) -> tuple[bytes, str]:
+        office = shutil.which("soffice") or shutil.which("libreoffice")
+        if not office:
+            raise ScannerError("Не найден LibreOffice. Установите LibreOffice и перезапустите локальный помощник.")
+        with tempfile.TemporaryDirectory(prefix="docudesk-") as temp_dir:
+            source = os.path.join(temp_dir, filename)
+            out_dir = os.path.join(temp_dir, "out")
+            os.makedirs(out_dir, exist_ok=True)
+            with open(source, "wb") as stream:
+                stream.write(data)
+            command = [office, "--headless", "--convert-to", output_ext, "--outdir", out_dir, source]
+            try:
+                proc = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+            except subprocess.TimeoutExpired as exc:
+                raise ScannerError("Конвертация превысила лимит времени (180 секунд).") from exc
+            expected = os.path.join(out_dir, os.path.splitext(filename)[0] + "." + output_ext.split(":")[0])
+            if proc.returncode != 0 or not os.path.isfile(expected):
+                detail = (proc.stderr or proc.stdout or "LibreOffice не создал выходной файл.")[-1200:]
+                raise ScannerError("LibreOffice не смог выполнить конвертацию. " + detail)
+            with open(expected, "rb") as stream:
+                result = stream.read(MAX_CONVERT_BYTES + 1)
+            if len(result) > MAX_CONVERT_BYTES:
+                raise ScannerError("Результат превышает допустимый размер 80 МБ.")
+            return result, os.path.basename(expected)
+
     def do_POST(self) -> None:
         if not self._origin_allowed():
             self._json(403, {"ok": False, "error": "Origin not allowed"})
             return
-        if urlsplit(self.path).path != "/scan":
+        path = urlsplit(self.path).path
+        if path in ("/convert", "/pdfa"):
+            try:
+                filename, data = self._read_upload()
+                if path == "/pdfa":
+                    if not filename.lower().endswith(".pdf"):
+                        raise ScannerError("Для PDF/A выберите PDF-файл.")
+                    # LibreOffice PDF export filter with PDF/A-1b selection.
+                    result, out_name = self._run_office_conversion(filename, data, "pdf:writer_pdf_Export:{\\"SelectPdfVersion\\":{\\"type\\":\\"long\\",\\"value\\":1}}")
+                else:
+                    target = self.headers.get("X-Convert-To", "").lower().strip()
+                    allowed = {
+                        ".doc": "pdf", ".docx": "pdf",
+                        ".ppt": "pdf", ".pptx": "pdf",
+                        ".xls": "pdf", ".xlsx": "pdf",
+                        ".odt": "pdf", ".odp": "pdf", ".ods": "pdf",
+                    }
+                    if target != "pdf" or os.path.splitext(filename)[1].lower() not in allowed:
+                        raise ScannerError("Поддерживаются только Word, PowerPoint и Excel в PDF.")
+                    result, out_name = self._run_office_conversion(filename, data, "pdf")
+                self._headers(200, "application/pdf")
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + __import__("urllib.parse", fromlist=["quote"]).quote(out_name))
+                self.end_headers()
+                self.wfile.write(result)
+            except (ValueError, TypeError, ScannerError, OSError, subprocess.SubprocessError) as exc:
+                self._json(400, {"ok": False, "error": str(exc) or "Ошибка конвертации."})
+            return
+        if path != "/scan":
             self._json(404, {"ok": False, "error": "Not found"})
             return
         try:
