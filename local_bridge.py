@@ -278,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not filename.lower().endswith(".pdf"):
                         raise ScannerError("Для PDF/A выберите PDF-файл.")
                     # LibreOffice PDF export filter with PDF/A-1b selection.
-                    result, out_name = self._run_office_conversion(filename, data, "pdf:writer_pdf_Export:{\\"SelectPdfVersion\\":{\\"type\\":\\"long\\",\\"value\\":1}}")
+                    result, out_name = self._run_office_conversion(filename, data, 'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":1}}')
                 else:
                     target = self.headers.get("X-Convert-To", "").lower().strip()
                     source_ext = os.path.splitext(filename)[1].lower()
