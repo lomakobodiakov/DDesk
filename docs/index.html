@@ -134,8 +134,9 @@ body{min-height:100vh}
 
 <section class="tool" id="ocr"><div class="icon">Aa</div><h2>OCR — распознать текст</h2><p>Извлеките текст из сканов, фотографий или PDF. Распознавание выполняется в браузере; исходные файлы не отправляются на сервер.</p><label class="drop" data-drop="ocr"><strong>＋ Выберите PDF или изображения</strong><small>PDF, JPG, PNG, WebP · можно несколько изображений</small><input hidden type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp" multiple></label><ul class="filelist" id="ocr-list"></ul><div class="controls"><label class="muted" for="ocr-lang">Язык</label><select class="field" id="ocr-lang"><option value="ukr+eng">Украинский + английский</option><option value="rus+eng">Русский + английский</option><option value="eng">Английский</option><option value="ukr">Украинский</option><option value="rus">Русский</option></select><button class="btn" id="ocr-go" disabled>Распознать текст</button></div><textarea id="ocr-result" aria-label="Распознанный текст" placeholder="Здесь появится распознанный текст…" style="width:100%;min-height:150px;margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;font:13px/1.5 ui-monospace,monospace;resize:vertical"></textarea><div class="controls"><button class="btn secondary" id="ocr-download" disabled>Скачать TXT</button></div><div class="status" id="ocr-status" aria-live="polite"></div></section>
 <section class="tool" id="scanner">
-<div class="icon">▤</div><h2>Сканирование Canon MF440 Series</h2>
-<p>Сканируйте документы по сети через локальный помощник Windows. Полученные страницы обрабатываются в браузере.</p>
+<div class="icon">▤</div><h2>Сканирование документов</h2>
+<p>Выберите сканер или МФУ, подключённое к этому компьютеру по USB или доступное в локальной сети. Для обнаружения USB-устройств нужен локальный помощник Windows.</p>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin:14px 0"><div><label for="scan-device" class="muted">Устройство сканирования</label><select id="scan-device" class="field" style="width:100%;margin-top:6px"><option value="escl:canon-mf440">Canon MF440 Series (сеть eSCL)</option></select></div><button class="btn secondary" id="scanner-refresh" type="button">Обновить устройства</button></div>
 <div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
  <div><label for="scan-source" class="muted">Источник</label><select id="scan-source" class="field" style="width:100%;margin-top:6px"><option value="Platen">Стекло (одна страница)</option><option value="Feeder">Автоподатчик (несколько страниц)</option></select></div>
  <div><label for="scan-paper" class="muted">Размер бумаги</label><select id="scan-paper" class="field" style="width:100%;margin-top:6px"><option value="A4">A4</option><option value="Letter">Letter</option><option value="Legal">Legal</option></select></div>
@@ -337,24 +338,42 @@ function renderScannedPages(){
  });
  $('scanner-pdf').disabled=!scannedPages.length;$('scanner-clear').disabled=!scannedPages.length;
 }
-$('scanner-check').onclick=async()=>{
- status('scanner','Проверяем локальный помощник и Canon…');
+async function refreshScannerDevices(){
+ const select=$('scan-device'), previous=select.value;
+ status('scanner','Ищем сканеры Windows и сетевые устройства…');
  try{
-  const healthResponse=await fetch(scanBridge+'/health',{cache:'no-store'});
-  if(!healthResponse.ok)throw new Error('Локальный помощник ответил HTTP '+healthResponse.status+'.');
-  const response=await fetch(scanBridge+'/capabilities',{cache:'no-store'});
-  const result=await response.json();
-  if(!response.ok||!result.ok)throw new Error(result.error||('Ошибка помощника HTTP '+response.status+'.'));
-  status('scanner','Подключение успешно. Canon MF440 Series отвечает по eSCL. Доступные источники: '+((result.sources||[]).join(', ')||'устройство не перечислило источники')+'.','ok');
+  const health=await fetch(scanBridge+'/health',{cache:'no-store'});
+  if(!health.ok)throw new Error('Локальный помощник недоступен (HTTP '+health.status+').');
+  const response=await fetch(scanBridge+'/devices',{cache:'no-store'}),result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.error||'Не удалось получить список устройств.');
+  select.innerHTML='';
+  (result.devices||[]).forEach(device=>{
+   const option=document.createElement('option');option.value=device.id;
+   option.textContent=device.name+(device.connection==='Windows WIA'?' · Windows/USB':'');
+   select.append(option);
+  });
+  if([...select.options].some(option=>option.value===previous))select.value=previous;
+  status('scanner','Найдено устройств: '+select.options.length+'. Выбери нужный сканер и нажми «Сканировать».','ok');
  }catch(e){
-  console.error(e);status('scanner','Не удалось подключиться: '+(e.message||'неизвестная ошибка')+'. Проверь запуск start_local_bridge.bat и разрешение локальной сети в Chrome.','err');
+  console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
+ }
+}
+$('scanner-refresh').onclick=refreshScannerDevices;
+$('scanner-check').onclick=async()=>{
+ await refreshScannerDevices();
+ if($('scan-device').value==='escl:canon-mf440'){
+  try{
+   const response=await fetch(scanBridge+'/capabilities',{cache:'no-store'}),result=await response.json();
+   if(!response.ok||!result.ok)throw new Error(result.error||'Сканер не отвечает.');
+   status('scanner','Список устройств обновлён. Canon MF440 Series отвечает по eSCL.','ok');
+  }catch(e){status('scanner','Устройство выбрано, но не отвечает: '+(e.message||'ошибка')+'.','err')}
  }
 };
 $('scanner-start').onclick=async()=>{
  $('scanner-start').disabled=true;
  status('scanner','Отправляем задание сканирования в Canon… Это может занять несколько минут.');
  try{
-  const response=await fetch(scanBridge+'/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:$('scan-source').value,colorMode:$('scan-color').value,resolution:Number($('scan-dpi').value),paperSize:$('scan-paper').value})});
+  const response=await fetch(scanBridge+'/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceId:$('scan-device').value,source:$('scan-source').value,colorMode:$('scan-color').value,resolution:Number($('scan-dpi').value),paperSize:$('scan-paper').value})});
   const result=await response.json();
   if(!response.ok||!result.ok)throw new Error(result.error||('Ошибка сканирования HTTP '+response.status+'.'));
   if(!Array.isArray(result.pages)||!result.pages.length)throw new Error('Сканер не вернул страницы. Проверьте бумагу и выбранный источник.');
@@ -379,6 +398,7 @@ $('scanner-pdf').onclick=()=>run('scanner',async()=>{
  return 'PDF создан из '+scannedPages.length+' страниц.';
 });
 $('pdfimg-go').onclick=()=>run('pdfimg',async()=>{if(!window.pdfjsLib)throw new Error('Не удалось загрузить PDF.js. Проверьте подключение к интернету.');const file=state.pdfimg[0],pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,zip=new JSZip(),folder=zip.folder(safeName(file.name)),dpi=Number($('img-dpi').value),scale=dpi/72,format=$('img-format').value.toLowerCase();for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i),viewport=page.getViewport({scale}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Не удалось создать изображение')) ,format==='jpg'?'image/jpeg':'image/png',.92));folder.file('page_'+String(i).padStart(3,'0')+'.'+format,await blob.arrayBuffer());canvas.width=canvas.height=0}download(await zip.generateAsync({type:'blob'}),safeName(file.name)+'-images.zip');return 'Страницы экспортированы в ZIP.'});
+refreshScannerDevices();
 })();
 </script>
 </body>
