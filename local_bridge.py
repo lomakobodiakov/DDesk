@@ -161,6 +161,72 @@ def scan_document(settings: bytes) -> list[dict]:
     return pages
 
 
+def list_wia_scanners() -> list[dict]:
+    """Enumerate scanner devices exposed by Windows WIA; unavailable on non-Windows systems."""
+    if os.name != "nt":
+        return []
+    try:
+        import win32com.client
+        manager = win32com.client.Dispatch("WIA.DeviceManager")
+        devices = []
+        for info in manager.DeviceInfos:
+            try:
+                if int(info.Type) != 1:
+                    continue
+                name = "Сканер"
+                device_id = str(info.DeviceID)
+                for prop in info.Properties:
+                    if str(prop.Name).lower() == "name":
+                        name = str(prop.Value)
+                        break
+                devices.append({"id": "wia:" + device_id, "name": name, "connection": "Windows WIA"})
+            except Exception:
+                continue
+        return devices
+    except Exception:
+        return []
+
+
+def scan_wia_one_page(device_id: str, color_mode: str, resolution: int) -> list[dict]:
+    """Scan one page through a Windows WIA device and return a browser-ready image."""
+    if os.name != "nt":
+        raise ScannerError("USB/WIA-сканирование доступно только в Windows.")
+    try:
+        import win32com.client
+        from PIL import Image
+    except ImportError as exc:
+        raise ScannerError("Для USB-сканирования нужны pywin32 и Pillow. Переустановите зависимости помощника.") from exc
+    raw_id = device_id.removeprefix("wia:")
+    manager = win32com.client.Dispatch("WIA.DeviceManager")
+    selected = None
+    for info in manager.DeviceInfos:
+        if str(info.DeviceID) == raw_id:
+            selected = info
+            break
+    if selected is None:
+        raise ScannerError("Выбранный сканер Windows не найден. Нажмите «Обновить устройства».")
+    try:
+        item = selected.Connect().Items(1)
+        for prop_id, value in ((6147, resolution), (6148, resolution), (6146, 1 if color_mode == "RGB24" else 2 if color_mode == "Grayscale8" else 4)):
+            try:
+                item.Properties(str(prop_id)).Value = value
+            except Exception:
+                pass
+        transfer = item.Transfer()
+        with tempfile.TemporaryDirectory(prefix="docudesk-wia-") as folder:
+            raw_path = os.path.join(folder, "scan.bmp")
+            transfer.SaveFile(raw_path)
+            with Image.open(raw_path) as scanned:
+                from io import BytesIO
+                output = BytesIO()
+                scanned.convert("RGB").save(output, format="JPEG", quality=94)
+                data = output.getvalue()
+        return [{"name": "scan_001.jpg", "content_type": "image/jpeg", "size": len(data),
+                 "data": base64.b64encode(data).decode("ascii")}]
+    except Exception as exc:
+        raise ScannerError("Windows не смог выполнить сканирование этим устройством: " + str(exc)) from exc
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "DocuDeskLocalBridge/0.2"
 
@@ -204,6 +270,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/health":
             self._json(200, {"ok": True, "service": "DocuDesk Local Bridge", "version": "0.2"})
+            return
+        if path == "/devices":
+            devices = list_wia_scanners()
+            devices.append({"id": "escl:canon-mf440", "name": "Canon MF440 Series (сеть eSCL)", "connection": "eSCL", "address": PRINTER_HOST})
+            self._json(200, {"ok": True, "devices": devices})
             return
         if path == "/capabilities":
             try:
@@ -328,15 +399,24 @@ class Handler(BaseHTTPRequestHandler):
             if length < 1 or length > 16 * 1024:
                 raise ScannerError("Некорректный размер запроса.")
             request_data = json.loads(self.rfile.read(length).decode("utf-8"))
+            device_id = str(request_data.get("deviceId", "escl:canon-mf440"))
             source = request_data.get("source", "Platen")
             color_mode = request_data.get("colorMode", "RGB24")
             resolution = int(request_data.get("resolution", 300))
             paper_size = request_data.get("paperSize", "A4")
-            settings = make_scan_settings(source, color_mode, resolution, paper_size)
-            self._json(200, {
-                "ok": True, "printer": "Canon MF440 Series",
-                "pages": scan_document(settings),
-            })
+            if device_id.startswith("wia:"):
+                if source == "Feeder":
+                    raise ScannerError("Для устройств Windows WIA автоподатчик пока не поддерживается в этой версии. Выберите «Стекло» или устройство eSCL.")
+                pages = scan_wia_one_page(device_id, color_mode, resolution)
+                self._json(200, {"ok": True, "printer": device_id[4:], "pages": pages})
+            elif device_id == "escl:canon-mf440":
+                settings = make_scan_settings(source, color_mode, resolution, paper_size)
+                self._json(200, {
+                    "ok": True, "printer": "Canon MF440 Series",
+                    "pages": scan_document(settings),
+                })
+            else:
+                raise ScannerError("Неизвестное устройство сканирования. Обновите список устройств.")
         except (ValueError, TypeError, json.JSONDecodeError, ScannerError,
                 OSError, TimeoutError, http.client.HTTPException) as exc:
             self._json(502, {"ok": False, "error": str(exc) or "Ошибка сканирования."})
