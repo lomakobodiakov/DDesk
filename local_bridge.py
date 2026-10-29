@@ -280,15 +280,14 @@ class Handler(BaseHTTPRequestHandler):
                     result, out_name = self._run_office_conversion(filename, data, "pdf:writer_pdf_Export:{\\"SelectPdfVersion\\":{\\"type\\":\\"long\\",\\"value\\":1}}")
                 else:
                     target = self.headers.get("X-Convert-To", "").lower().strip()
+                    source_ext = os.path.splitext(filename)[1].lower()
                     allowed = {
-                        ".doc": "pdf", ".docx": "pdf",
-                        ".ppt": "pdf", ".pptx": "pdf",
-                        ".xls": "pdf", ".xlsx": "pdf",
-                        ".odt": "pdf", ".odp": "pdf", ".ods": "pdf",
+                        "pdf": {".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".odt", ".odp", ".ods"},
+                        "docx": {".pdf"}, "pptx": {".pdf"}, "xlsx": {".pdf"},
                     }
-                    if target != "pdf" or os.path.splitext(filename)[1].lower() not in allowed:
-                        raise ScannerError("Поддерживаются только Word, PowerPoint и Excel в PDF.")
-                    result, out_name = self._run_office_conversion(filename, data, "pdf")
+                    if target not in allowed or source_ext not in allowed[target]:
+                        raise ScannerError("Поддерживаются Word/PowerPoint/Excel в PDF и пробная конвертация PDF в DOCX/PPTX/XLSX.")
+                    result, out_name = self._run_office_conversion(filename, data, target)
                 self._headers(200, "application/pdf")
                 self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + __import__("urllib.parse", fromlist=["quote"]).quote(out_name))
                 self.end_headers()
