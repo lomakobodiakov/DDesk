@@ -241,10 +241,36 @@ class Handler(BaseHTTPRequestHandler):
             filename = "document.bin"
         return filename, self.rfile.read(length)
 
+    def _find_office_binary(self) -> str | None:
+        # First try PATH, then common Windows installation locations.
+        office = shutil.which("soffice.com") or shutil.which("soffice.exe") or shutil.which("soffice") or shutil.which("libreoffice")
+        if office:
+            return office
+
+        roots = [
+            os.environ.get("PROGRAMFILES", r"C:\\Program Files"),
+            os.environ.get("PROGRAMFILES(X86)", r"C:\\Program Files (x86)"),
+            os.environ.get("LOCALAPPDATA", ""),
+        ]
+        candidates = []
+        for root in roots:
+            if not root:
+                continue
+            candidates.extend([
+                os.path.join(root, "LibreOffice", "program", "soffice.com"),
+                os.path.join(root, "LibreOffice", "program", "soffice.exe"),
+                os.path.join(root, "Programs", "LibreOffice", "program", "soffice.com"),
+                os.path.join(root, "Programs", "LibreOffice", "program", "soffice.exe"),
+            ])
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
     def _run_office_conversion(self, filename: str, data: bytes, output_ext: str) -> tuple[bytes, str]:
-        office = shutil.which("soffice") or shutil.which("libreoffice")
+        office = self._find_office_binary()
         if not office:
-            raise ScannerError("Не найден LibreOffice. Установите LibreOffice и перезапустите локальный помощник.")
+            raise ScannerError("Не удалось найти исполняемый файл LibreOffice (soffice.com/soffice.exe). Проверьте папку установки LibreOffice или переустановите программу.")
         with tempfile.TemporaryDirectory(prefix="docudesk-") as temp_dir:
             source = os.path.join(temp_dir, filename)
             out_dir = os.path.join(temp_dir, "out")
