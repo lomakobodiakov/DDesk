@@ -153,6 +153,9 @@ body{min-height:100vh}
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 (() => {
 
@@ -203,9 +206,9 @@ function setupNavigation(){
  wordpdf:{accept:'.doc,.docx',multiple:false,title:'＋ Выберите Word-файл',subtitle:'DOC/DOCX · обработка локально через LibreOffice',description:'Конвертация выполняется на компьютере через локальный помощник и LibreOffice.',available:true,valid:f=>/\.docx?$/i.test(f.name)},
  pptpdf:{accept:'.ppt,.pptx',multiple:false,title:'＋ Выберите PowerPoint-файл',subtitle:'PPT/PPTX · обработка локально через LibreOffice',description:'Конвертация выполняется на компьютере через локальный помощник и LibreOffice.',available:true,valid:f=>/\.pptx?$/i.test(f.name)},
  excelpdf:{accept:'.xls,.xlsx',multiple:false,title:'＋ Выберите Excel-файл',subtitle:'XLS/XLSX · обработка локально через LibreOffice',description:'Конвертация выполняется на компьютере через локальный помощник и LibreOffice.',available:true,valid:f=>/\.xlsx?$/i.test(f.name)},
- pdfword:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат DOCX · локальная пробная конвертация',description:'Преобразование PDF в DOCX через LibreOffice — форматирование сложных страниц может измениться.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
- pdfppt:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат PPTX · локальная пробная конвертация',description:'LibreOffice попробует преобразовать PDF в PPTX; сложный макет может быть перенесён неточно.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
- pdfexcel:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат XLSX · пробная конвертация',description:'Конвертация PDF в XLSX через LibreOffice может не сохранить таблицы как редактируемые ячейки.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
+ pdfword:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат DOCX · извлечение текста в браузере',description:'Извлекает текст из PDF и собирает DOCX. Исходное форматирование и таблицы могут измениться.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
+ pdfppt:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат PPTX · слайды-изображения',description:'Каждая страница PDF станет изображением на отдельном слайде. Внешний вид сохраняется, элементы не редактируются по отдельности.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
+ pdfexcel:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF-файл',subtitle:'Результат XLSX · извлечение текста',description:'Извлекает текстовые элементы PDF в строки таблицы. Сложные таблицы могут потребовать ручной правки.',available:true,valid:f=>/\.pdf$/i.test(f.name)},
  pdfa:{accept:'.pdf,application/pdf',multiple:false,title:'＋ Выберите PDF для PDF/A',subtitle:'Создание PDF/A-1b через LibreOffice',description:'Пересохранение PDF в PDF/A-1b через LibreOffice. Для юридически значимых документов проверьте соответствие стандарту отдельно.',available:true,valid:f=>/\.pdf$/i.test(f.name)}
  };
  function renderConvert(){convertFilesEl.innerHTML='';if(!convertFiles.length)convertFilesEl.innerHTML='<li class="workspace-empty">Файлы ещё не выбраны</li>';convertFiles.forEach(f=>{const li=document.createElement('li'),n=document.createElement('span'),z=document.createElement('span');n.className='file-name';n.textContent=f.name;z.className='file-size';z.textContent=fmt(f.size);li.append(n,z);convertFilesEl.append(li)});convertClear.disabled=!convertFiles.length;convertRun.disabled=!convertFiles.length||!convertInfo[convertAction.value].available}
@@ -213,6 +216,48 @@ function setupNavigation(){
  convertAction.addEventListener('change',resetConvert);convertInput.addEventListener('change',()=>{const x=convertInfo[convertAction.value],a=Array.from(convertInput.files).filter(x.valid);if(!a.length){convertStatus.textContent='Выберите файл нужного формата.';convertStatus.className='status err';return}convertFiles=x.multiple?[...convertFiles,...a]:[a[0]];renderConvert();convertStatus.textContent='Выбрано файлов: '+convertFiles.length;convertStatus.className='status ok';convertInput.value=''});
  convertDrop.addEventListener('click',e=>{if(e.target!==convertInput)convertInput.click()});convertDrop.addEventListener('dragover',e=>{e.preventDefault();convertDrop.classList.add('over')});convertDrop.addEventListener('dragleave',()=>convertDrop.classList.remove('over'));convertDrop.addEventListener('drop',e=>{e.preventDefault();convertDrop.classList.remove('over');const x=convertInfo[convertAction.value],a=Array.from(e.dataTransfer.files).filter(x.valid);if(!a.length){convertStatus.textContent='Выберите файл нужного формата.';convertStatus.className='status err';return}convertFiles=x.multiple?[...convertFiles,...a]:[a[0]];renderConvert()});
  convertClear.addEventListener('click',()=>{convertFiles=[];renderConvert();convertStatus.textContent='';convertStatus.className='status'});
+ async function convertPdfToWord(file){
+  if(!window.docx||!window.pdfjsLib)throw new Error('Не удалось загрузить библиотеки PDF/DOCX. Проверьте подключение к интернету.');
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,children=[];
+  for(let i=1;i<=pdf.numPages;i++){
+   convertStatus.textContent='Извлекаем текст: страница '+i+' из '+pdf.numPages+'…';
+   const page=await pdf.getPage(i),content=await page.getTextContent(),lines=new Map();
+   for(const item of content.items){if(!item.str||!item.str.trim())continue;const y=Math.round(item.transform[5]/3)*3;const line=lines.get(y)||[];line.push({x:item.transform[4],text:item.str});lines.set(y,line)}
+   const ordered=[...lines.entries()].sort((a,b)=>b[0]-a[0]);
+   if(i>1)children.push(new docx.Paragraph({text:'',pageBreakBefore:true}));
+   for(const [,items] of ordered){items.sort((a,b)=>a.x-b.x);const text=items.map(x=>x.text).join(' ').replace(/\s+/g,' ').trim();if(text)children.push(new docx.Paragraph({text}))}
+  }
+  const document=new docx.Document({sections:[{children}]});
+  const blob=await docx.Packer.toBlob(document);download(blob,safeName(file.name)+'-converted.docx');
+ }
+ async function convertPdfToPowerPoint(file){
+  if(!window.pdfjsLib)throw new Error('Не удалось загрузить PDF.js.');
+  const Pptx=window.pptxgenjs||window.PptxGenJS||window.pptxgen;if(!Pptx)throw new Error('Не удалось загрузить генератор PowerPoint.');
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,pptx=new Pptx();pptx.layout='LAYOUT_WIDE';pptx.author='DocuDesk';
+  const sw=13.333,sh=7.5;
+  for(let i=1;i<=pdf.numPages;i++){
+   convertStatus.textContent='Создаём слайд '+i+' из '+pdf.numPages+'…';
+   const page=await pdf.getPage(i),viewport=page.getViewport({scale:1.5}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+   await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+   const data=canvas.toDataURL('image/png'),ratio=canvas.width/canvas.height;let w=sw,h=w/ratio;if(h>sh){h=sh;w=h*ratio}
+   const slide=pptx.addSlide();slide.addImage({data,x:(sw-w)/2,y:(sh-h)/2,w,h});canvas.width=canvas.height=0;
+  }
+  const blob=await pptx.write({outputType:'blob'});download(blob,safeName(file.name)+'-converted.pptx');
+ }
+ async function convertPdfToExcel(file){
+  if(!window.pdfjsLib||!window.XLSX)throw new Error('Не удалось загрузить библиотеки PDF/Excel.');
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,rows=[];
+  for(let i=1;i<=pdf.numPages;i++){
+   convertStatus.textContent='Извлекаем текстовую таблицу: страница '+i+' из '+pdf.numPages+'…';
+   const page=await pdf.getPage(i),content=await page.getTextContent(),lines=new Map();
+   for(const item of content.items){if(!item.str||!item.str.trim())continue;const y=Math.round(item.transform[5]/3)*3;const line=lines.get(y)||[];line.push({x:item.transform[4],text:item.str});lines.set(y,line)}
+   rows.push(['Страница '+i]);
+   for(const [,items] of [...lines.entries()].sort((a,b)=>b[0]-a[0])){items.sort((a,b)=>a.x-b.x);rows.push(items.map(x=>x.text.trim()))}
+   rows.push([]);
+  }
+  const sheet=XLSX.utils.aoa_to_sheet(rows),book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Извлечённый текст');
+  const bytes=XLSX.write(book,{bookType:'xlsx',type:'array'});download(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),safeName(file.name)+'-converted.xlsx');
+ }
  async function convertViaBridge(file,target,isPdfA=false){
   const endpoint=isPdfA?'/pdfa':'/convert';
   const response=await fetch('http://127.0.0.1:8765'+endpoint,{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Filename':encodeURIComponent(file.name),'X-Convert-To':target},body:await file.arrayBuffer(),cache:'no-store'});
@@ -226,7 +271,7 @@ function setupNavigation(){
   const ext=isPdfA?'pdf':target;
   download(blob,safeName(file.name)+'-converted.'+ext);
  }
- convertRun.addEventListener('click',async()=>{try{const action=convertAction.value;convertStatus.textContent='Обработка…';convertStatus.className='status';if(action==='jpgpdf'){const out=await PDFLib.PDFDocument.create();for(const f of convertFiles){const image=await out.embedJpg(await f.arrayBuffer()),p=out.addPage([image.width,image.height]);p.drawImage(image,{x:0,y:0,width:image.width,height:image.height})}download(new Blob([await out.save()],{type:'application/pdf'}),'DocuDesk-JPG-to-PDF.pdf');convertStatus.textContent='PDF создан.';convertStatus.className='status ok'}else if(action==='htmlpdf'){const url=URL.createObjectURL(convertFiles[0]),tab=window.open(url,'_blank');if(!tab)throw new Error('Разрешите всплывающие окна для DocuDesk.');convertStatus.textContent='В новой вкладке нажмите Ctrl+P и выберите «Сохранить как PDF». ';convertStatus.className='status ok'}else if(['wordpdf','pptpdf','excelpdf'].includes(action)){const target='pdf';await convertViaBridge(convertFiles[0],target);convertStatus.textContent='PDF создан. Проверьте результат перед использованием.';convertStatus.className='status ok'}else if(action==='pdfword'){await convertViaBridge(convertFiles[0],'docx');convertStatus.textContent='DOCX подготовлен. Проверьте текст и форматирование.';convertStatus.className='status ok'}else if(action==='pdfppt'){await convertViaBridge(convertFiles[0],'pptx');convertStatus.textContent='PPTX подготовлен. Проверьте слайды и форматирование.';convertStatus.className='status ok'}else if(action==='pdfexcel'){await convertViaBridge(convertFiles[0],'xlsx');convertStatus.textContent='XLSX подготовлен. Проверьте таблицы и ячейки.';convertStatus.className='status ok'}else if(action==='pdfa'){await convertViaBridge(convertFiles[0],'pdf',true);convertStatus.textContent='PDF/A создан. Для гарантии соответствия стандарту проверьте файл специализированным валидатором.';convertStatus.className='status ok'}else if(action==='pdfjpg'){state.pdfimg=[convertFiles[0]];render('pdfimg');$('img-format').value='JPG';$('img-dpi').value='150';navigate('pdf');actionSelect.value='pdfimg';setWorkspaceAction();workspaceFiles=[convertFiles[0]];updateWorkspaceFiles();document.getElementById('pdf-workspace-format').value='JPG';document.getElementById('pdf-workspace-dpi').value='150';workspaceStatus.textContent='Файл подготовлен. Нажмите «Экспортировать изображения».';workspaceStatus.className='status ok'} }catch(e){convertStatus.textContent=e.message||'Ошибка конвертации.';convertStatus.className='status err'}});
+ convertRun.addEventListener('click',async()=>{try{const action=convertAction.value;convertStatus.textContent='Обработка…';convertStatus.className='status';if(action==='jpgpdf'){const out=await PDFLib.PDFDocument.create();for(const f of convertFiles){const image=await out.embedJpg(await f.arrayBuffer()),p=out.addPage([image.width,image.height]);p.drawImage(image,{x:0,y:0,width:image.width,height:image.height})}download(new Blob([await out.save()],{type:'application/pdf'}),'DocuDesk-JPG-to-PDF.pdf');convertStatus.textContent='PDF создан.';convertStatus.className='status ok'}else if(action==='htmlpdf'){const url=URL.createObjectURL(convertFiles[0]),tab=window.open(url,'_blank');if(!tab)throw new Error('Разрешите всплывающие окна для DocuDesk.');convertStatus.textContent='В новой вкладке нажмите Ctrl+P и выберите «Сохранить как PDF». ';convertStatus.className='status ok'}else if(['wordpdf','pptpdf','excelpdf'].includes(action)){const target='pdf';await convertViaBridge(convertFiles[0],target);convertStatus.textContent='PDF создан. Проверьте результат перед использованием.';convertStatus.className='status ok'}else if(action==='pdfword'){await convertPdfToWord(convertFiles[0]);convertStatus.textContent='DOCX создан. Проверьте извлечённый текст и форматирование.';convertStatus.className='status ok'}else if(action==='pdfppt'){await convertPdfToPowerPoint(convertFiles[0]);convertStatus.textContent='PPTX создан: страницы PDF добавлены как изображения на слайды.';convertStatus.className='status ok'}else if(action==='pdfexcel'){await convertPdfToExcel(convertFiles[0]);convertStatus.textContent='XLSX создан из текстовых элементов PDF. Проверьте структуру таблиц.';convertStatus.className='status ok'}else if(action==='pdfa'){await convertViaBridge(convertFiles[0],'pdf',true);convertStatus.textContent='PDF/A создан. Для гарантии соответствия стандарту проверьте файл специализированным валидатором.';convertStatus.className='status ok'}else if(action==='pdfjpg'){state.pdfimg=[convertFiles[0]];render('pdfimg');$('img-format').value='JPG';$('img-dpi').value='150';navigate('pdf');actionSelect.value='pdfimg';setWorkspaceAction();workspaceFiles=[convertFiles[0]];updateWorkspaceFiles();document.getElementById('pdf-workspace-format').value='JPG';document.getElementById('pdf-workspace-dpi').value='150';workspaceStatus.textContent='Файл подготовлен. Нажмите «Экспортировать изображения».';workspaceStatus.className='status ok'} }catch(e){convertStatus.textContent=e.message||'Ошибка конвертации.';convertStatus.className='status err'}});
  resetConvert();
  const initial=location.hash.slice(1);if(['home','pdf','convert','ocr','scanner','about'].includes(initial))navigate(initial);
 }
