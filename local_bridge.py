@@ -29,9 +29,9 @@ ALLOWED_SOURCES = {"Platen", "Feeder"}
 ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
 ALLOWED_RESOLUTIONS = {150, 300, 600}
 PAPER_SIZES = {
-    "A4": (2480, 3508),
-    "Letter": (2550, 3300),
-    "Legal": (2550, 4200),
+    "A4": (827, 1169),
+    "Letter": (850, 1100),
+    "Legal": (850, 1400),
 }
 
 
@@ -77,7 +77,8 @@ def make_scan_settings(source: str, color_mode: str, resolution: int, paper_size
     width, height = PAPER_SIZES[paper_size]
     xml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"
- xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
+ xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"
+ xmlns:escl="http://schemas.hp.com/imaging/escl/2011/05/03">
   <pwg:Version>2.0</pwg:Version>
   <pwg:ScanRegions>
     <pwg:ScanRegion>
