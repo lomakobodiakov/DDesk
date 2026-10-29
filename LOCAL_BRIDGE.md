@@ -1,34 +1,49 @@
-# DocuDesk Local Bridge — first milestone
+# DocuDesk Local Bridge — Canon MF440 Series
 
-This helper solves the first connection step between the GitHub Pages interface and the Canon MF440 Series network scanner.
+This Windows helper connects the DocuDesk GitHub Pages interface to the Canon MF440 Series scanner at `192.168.5.180` using eSCL.
 
-## What it does now
+## Current features
 
-- Listens only on `127.0.0.1:8765` (not exposed to the LAN).
+- Listens only on `127.0.0.1:8765`.
 - Allows browser requests only from `https://lomakobodiakov.github.io`.
-- Requests `http://192.168.5.180/eSCL/ScannerCapabilities` from Windows and returns the XML to DocuDesk.
-- Includes a health endpoint at `http://127.0.0.1:8765/health`.
+- Checks scanner capabilities via `/capabilities`.
+- Creates an eSCL scan job via `POST /scan`.
+- Retrieves JPEG/PNG pages from the scanner and returns them to the browser.
+- The web app previews pages and can assemble them into a PDF locally in the browser.
 
-This first milestone tests the local bridge and scanner capability response only. It does not yet create scan jobs or download scanned pages.
+## Run
 
-## Run on Windows
+1. Download the latest repository ZIP from GitHub and extract it.
+2. Ensure Python 3 is installed on Windows.
+3. Double-click `start_local_bridge.bat` and keep its console open.
+4. Open `https://lomakobodiakov.github.io/DDesk/#scanner`.
+5. Click **Проверить подключение**, then choose source, paper size, color mode and DPI.
+6. Put paper on the platen or in the feeder, then click **Сканировать**.
+7. Review the page previews and click **Сохранить все страницы в PDF**.
 
-1. Download the repository or copy `local_bridge.py` and `start_local_bridge.bat` into the same folder.
-2. Ensure Python 3 is installed.
-3. Double-click `start_local_bridge.bat`.
-4. Keep its console window open.
-5. Open DocuDesk at `https://lomakobodiakov.github.io/DDesk/#scanner`.
-6. In Chrome, allow local network access if a permission prompt appears.
+## Notes and troubleshooting
 
-The current bridge is configured for the known printer address `192.168.5.180`. It requires the PC and printer to be on the same reachable network.
+- The configured scanner address is fixed to `192.168.5.180`; the PC must be able to reach it on the LAN.
+- If Chrome asks to allow local-network access, allow it for the DocuDesk site.
+- The scanner's exact supported modes can vary by model, firmware and capability response. If the device rejects a scan job, try 300 dpi, A4, Color, and Platen first, then share the exact error.
+- This first implementation requests JPEG pages and supports JPEG/PNG responses. PDF generation is performed in the browser.
+- The helper caps each image at 12 MiB and one job at 20 pages.
+- It binds only to loopback. Do not change the bind address to `0.0.0.0`; do not expose the helper to the LAN or internet.
+- Only the exact GitHub Pages origin is allowed for CORS.
 
-## Security notes
+## API
 
-- The bridge binds to loopback only.
-- It uses a fixed printer IP and fixed eSCL path; it is not a general-purpose proxy.
-- It permits CORS only for the GitHub Pages origin above.
-- Do not expose this service by changing the bind address to `0.0.0.0`.
+- `GET /health` — local helper status.
+- `GET /capabilities` — scanner capability XML and discovered input sources.
+- `POST /scan` — starts a scan. JSON body example:
 
-## Next milestone
+```json
+{
+  "source": "Platen",
+  "colorMode": "RGB24",
+  "resolution": 300,
+  "paperSize": "A4"
+}
+```
 
-After the health and capabilities tests pass from the web page, add eSCL scan-job creation, polling, and document download, then package the helper as a Windows executable.
+The `/scan` request can take several minutes while the scanner works.
