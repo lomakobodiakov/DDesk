@@ -16,7 +16,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -234,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length < 1 or length > MAX_CONVERT_BYTES:
             raise ScannerError("Размер файла должен быть не более 80 МБ.")
-        filename = self.headers.get("X-Filename", "document.bin")
+        filename = unquote(self.headers.get("X-Filename", "document.bin"))
         filename = os.path.basename(filename.replace("\\", "/"))
         if not filename or filename in (".", ".."):
             filename = "document.bin"
