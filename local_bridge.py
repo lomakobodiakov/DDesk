@@ -289,8 +289,6 @@ class Handler(BaseHTTPRequestHandler):
                         raise ScannerError("Поддерживаются Word/PowerPoint/Excel в PDF и пробная конвертация PDF в DOCX/PPTX/XLSX.")
                     result, out_name = self._run_office_conversion(filename, data, target)
                 self._headers(200, "application/pdf")
-                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + __import__("urllib.parse", fromlist=["quote"]).quote(out_name))
-                self.end_headers()
                 self.wfile.write(result)
             except (ValueError, TypeError, ScannerError, OSError, subprocess.SubprocessError) as exc:
                 self._json(400, {"ok": False, "error": str(exc) or "Ошибка конвертации."})
