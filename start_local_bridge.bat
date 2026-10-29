@@ -10,6 +10,17 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+py -3 -c "import win32com.client; from PIL import Image" >nul 2>nul
+if errorlevel 1 (
+  echo Installing required Windows scanner components...
+  py -3 -m pip install --user --upgrade pywin32 Pillow
+  if errorlevel 1 (
+    echo.
+    echo Could not install scanner components. Check internet access and Python installation.
+    pause
+    exit /b 1
+  )
+)
 py -3 local_bridge.py
 if errorlevel 1 (
   echo.
