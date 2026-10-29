@@ -56,7 +56,37 @@ $('kind').addEventListener('change',()=>{$('file').accept=$('kind').value==='pdf
 $('angle').addEventListener('input',()=>{if(image){crop=null;renderImage()}});
 $('brightness').addEventListener('input',()=>{if(image)renderImage()});$('contrast').addEventListener('input',()=>{if(image)renderImage()});$('image-adjust-reset').addEventListener('click',()=>{$('brightness').value='100';$('contrast').value='100';if(image)renderImage()});
 $('angle-reset').addEventListener('click',()=>{ $('angle').value='0';if(image)renderImage()});
-$('auto').addEventListener('click',async()=>{if(!image)return;say('Анализируем строки текста…');await new Promise(r=>setTimeout(r,20));try{const c=document.createElement('canvas'),iw=image.naturalWidth||image.width,ih=image.naturalHeight||image.height,s=Math.min(1,800/iw);c.width=Math.max(1,Math.round(iw*s));c.height=Math.max(1,Math.round(ih*s));const q=c.getContext('2d',{willReadFrequently:true});q.fillStyle='#fff';q.fillRect(0,0,c.width,c.height);q.drawImage(image,0,0,c.width,c.height);const d=q.getImageData(0,0,c.width,c.height).data;let best=0,bscore=-1;for(let deg=-5;deg<=5.001;deg+=.25){const a=deg*Math.PI/180,co=Math.cos(a),si=Math.sin(a),hist=new Uint32Array(c.height);for(let y=2;y<c.height-2;y+=2)for(let x=2;x<c.width-2;x+=2){const i=(y*c.width+x)*4;if(d[i]<145&&d[i+1]<145&&d[i+2]<145){const yy=Math.round((y-c.height/2)*co+(x-c.width/2)*si+c.height/2);if(yy>=0&&yy<c.height)hist[yy]++}}let score=0;for(let y=Math.floor(c.height*.08);y<c.height*.92;y++)score+=hist[y]*hist[y];if(score>bscore){bscore=score;best=deg}}if(!Number.isFinite(best)||bscore<=0)throw Error('Недостаточно контрастных строк для анализа.');$('angle').value=String(Math.max(-8,Math.min(8,best)));renderImage();say('Предлагаемый угол исправления: '+$('angle').value+'°. Проверьте строки текста. Если наклон усилился, поменяйте знак угла вручную.','ok')}catch(e){say('Автовыравнивание не удалось. Подстройте угол вручную.','err')}});
+$('auto').addEventListener('click',async()=>{
+ if(!work||!image){say('Сначала загрузите изображение или PDF.','err');return}
+ const button=$('auto');button.disabled=true;say('Анализируем наклон текста…');
+ await new Promise(resolve=>setTimeout(resolve,30));
+ try{
+  const src=work,limitW=700,s=Math.min(1,limitW/src.width),w=Math.max(1,Math.round(src.width*s)),h=Math.max(1,Math.round(src.height*s)),sample=document.createElement('canvas');
+  sample.width=w;sample.height=h;
+  const q=sample.getContext('2d',{willReadFrequently:true});q.fillStyle='#fff';q.fillRect(0,0,w,h);q.drawImage(src,0,0,w,h);
+  const pixels=q.getImageData(0,0,w,h).data,gray=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const k=(y*w+x)*4;gray[y*w+x]=(pixels[k]*30+pixels[k+1]*59+pixels[k+2]*11)/100}
+  let bestCorrection=0,bestScore=-Infinity,secondScore=-Infinity;
+  // Score how strongly dark pixels align into horizontal text lines after a trial correction.
+  for(let deg=-5;deg<=5.001;deg+=0.2){
+   const a=deg*Math.PI/180,co=Math.cos(a),si=Math.sin(a),hist=new Uint32Array(h);
+   for(let y=2;y<h-2;y+=2)for(let x=2;x<w-2;x+=2){
+    const g=gray[y*w+x];if(g<175&&g<=gray[y*w+x-1]+8&&g<=gray[y*w+x+1]+8){
+     const yy=Math.round((y-h/2)*co+(x-w/2)*si+h/2);if(yy>=Math.floor(h*.08)&&yy<Math.floor(h*.92))hist[yy]++;
+    }
+   }
+   let score=0;for(let y=Math.floor(h*.08);y<Math.floor(h*.92);y++)score+=hist[y]*hist[y];
+   if(score>bestScore){secondScore=bestScore;bestScore=score;bestCorrection=deg}else if(score>secondScore){secondScore=score}
+  }
+  if(!Number.isFinite(bestScore)||bestScore<=0)throw Error('Не удалось найти достаточно чёткие горизонтальные строки текста.');
+  if(Math.abs(bestCorrection)<0.12){say('Заметного перекоса не обнаружено. Текущий угол '+Number($('angle').value).toFixed(1)+'° оставлен без изменений.','ok');return}
+  const current=Number($('angle').value)||0,next=Math.max(-8,Math.min(8,Math.round((current+bestCorrection)*10)/10));
+  if(Math.abs(next-current)<0.05){say('Найден наклон, но достигнут предел ±8°. Подстройте угол вручную.','err');return}
+  $('angle').value=String(next);renderImage();
+  say('Автовыравнивание выполнено: '+(current>0?'+':'')+current.toFixed(1)+'° → '+(next>0?'+':'')+next.toFixed(1)+'°. Проверьте результат.','ok');
+ }catch(e){say('Не удалось автоматически определить наклон: '+(e&&e.message?e.message:'неизвестная ошибка')+' Попробуйте скан с чёткими строками текста или настройте угол вручную.','err')}
+ finally{button.disabled=false}
+});
 $('left').addEventListener('click',()=>{pdfRotation=(pdfRotation+270)%360;say('Поворот PDF: '+pdfRotation+'°')});$('right').addEventListener('click',()=>{pdfRotation=(pdfRotation+90)%360;say('Поворот PDF: '+pdfRotation+'°')});
 $('reset').addEventListener('click',()=>{crop=null;preview();say('Обрезка сброшена.')});
 $('clear').addEventListener('click',()=>{file=null;image=null;work=null;pdfBytes=null;crop=null;$('file').value='';$('save').disabled=true;$('reset').disabled=true;$('clear').disabled=true;preview();say('Файл очищен.')});
