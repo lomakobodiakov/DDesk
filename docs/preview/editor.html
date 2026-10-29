@@ -27,10 +27,10 @@
   <p>Выделите область обрезки мышью или пальцем. Яркость, контрастность и устранение перекоса применяются при сохранении. Автовыравнивание лучше работает со сканами с горизонтальными строками текста.</p>
  </div>
  <div class="options" id="pdf-options" hidden>
-  <div class="controls"><button class="btn secondary" id="left">↶ Повернуть на 90°</button><button class="btn secondary" id="right">↷ Повернуть на 90°</button><button class="btn secondary" id="rotate180-pdf">Повернуть на 180°</button><button class="btn secondary" id="mirror-pdf">Отзеркалить</button><button class="btn secondary" id="a4-place-pdf">Разместить выделение на A4</button><label class="control-label" for="crop-zoom">Масштаб фрагмента <span id="crop-zoom-label">100%</span></label><input id="crop-zoom" type="range" min="25" max="200" value="100" step="5" disabled></div>
   <p>Обрезка по выделенной области применяется ко всем страницам с одинаковыми пропорциями. Поворот выполняется шагами по 90°.</p>
  </div>
- <div class="canvas-wrap"><canvas id="canvas" hidden></canvas><div id="empty" class="empty">Предпросмотр появится здесь</div></div>
+ <div class="controls" id="transform-controls"><button class="btn secondary" id="action-rotate-left">↶ Повернуть на 90°</button><button class="btn secondary" id="action-rotate-right">↷ Повернуть на 90°</button><button class="btn secondary" id="action-rotate180">Повернуть на 180°</button><button class="btn secondary" id="action-mirror">Отзеркалить</button><button class="btn secondary" id="action-a4-place">Разместить выделение на A4</button><label class="control-label" for="crop-zoom">Масштаб фрагмента <span id="crop-zoom-label">100%</span></label><input id="crop-zoom" type="range" min="25" max="200" value="100" step="5" disabled></div>
+<div class="canvas-wrap"><canvas id="canvas" hidden></canvas><div id="empty" class="empty">Предпросмотр появится здесь</div></div>
  <div class="controls"><button class="btn" id="save" disabled>Сохранить результат</button><button class="btn secondary" id="reset" disabled>Сбросить обрезку</button><button class="btn secondary" id="clear" disabled>Очистить</button></div>
  <div class="status" id="status" aria-live="polite">Выберите файл, чтобы начать.</div>
  <p class="hint">Файлы обрабатываются в браузере. Для PDF яркость, контрастность и устранение перекоса применяются ко всем страницам; экспорт выполняется как изображения внутри PDF, поэтому текст после обработки нельзя будет выделять или искать. Проверяйте результат перед использованием официальных документов.</p>
@@ -98,14 +98,13 @@ async function runAutoDeskew(){
 }
 $('auto').addEventListener('click',runAutoDeskew);
 
-function rotateBy(deg){rotation=(rotation+deg+360)%360;pdfRotation=rotation;if(image)renderImage();say('Поворот: '+rotation+'°')}
-$('left').addEventListener('click',()=>rotateBy(-90));$('right').addEventListener('click',()=>rotateBy(90));$('rotate90-left').addEventListener('click',()=>rotateBy(-90));$('rotate90-right').addEventListener('click',()=>rotateBy(90));$('rotate180').addEventListener('click',()=>rotateBy(180));$('rotate180-pdf').addEventListener('click',()=>rotateBy(180));
-function flipImage(){mirrorX=!mirrorX;if(image)renderImage();say(mirrorX?'Зеркальное отражение включено.':'Зеркальное отражение отключено.')}
-$('mirror').addEventListener('click',flipImage);$('mirror-pdf').addEventListener('click',flipImage);
+function rotateBy(deg){rotation=(rotation+deg+360)%360;pdfRotation=rotation;if(image)renderImage();else if(work)preview();say('Поворот: '+rotation+'°')}
+$('action-rotate-left').addEventListener('click',()=>rotateBy(-90));$('action-rotate-right').addEventListener('click',()=>rotateBy(90));$('action-rotate180').addEventListener('click',()=>rotateBy(180));
+function flipImage(){mirrorX=!mirrorX;if(image)renderImage();else if(work)preview();say(mirrorX?'Зеркальное отражение включено.':'Зеркальное отражение отключено.')}
+$('action-mirror').addEventListener('click',flipImage);
 function placeOnA4(){if(!crop){say('Сначала выделите область для обрезки.','err');return}a4Mode=true;placedRect=null;$('crop-zoom').value=100;$('crop-zoom-label').textContent='100%';preview();$('crop-zoom').disabled=false;say('Выделение размещено на листе A4. Перетаскивайте фрагмент и настройте его масштаб.','ok')}
-function applyCropZoom(){const el=$('crop-zoom');if(!a4Mode||!placedRect||!crop){el.disabled=true;return}el.disabled=false;const z=Number(el.value)/100;const sw=Math.max(1,crop.w),sh=Math.max(1,crop.h),fit=Math.min(535/sw,782/sh,1),baseW=sw*fit,baseH=sh*fit,cx=placedRect.x+placedRect.w/2,cy=placedRect.y+placedRect.h/2;placedRect.w=baseW*z;placedRect.h=baseH*z;placedRect.x=Math.max(0,Math.min(595-placedRect.w,cx-placedRect.w/2));placedRect.y=Math.max(0,Math.min(842-placedRect.h,cy-placedRect.h/2));$('crop-zoom-label').textContent=el.value+'%';preview()}
 $('crop-zoom').addEventListener('input',()=>{if(!a4Mode||!crop)return;const z=Number($('crop-zoom').value)/100,sw=Math.max(1,crop.w),sh=Math.max(1,crop.h),fit=Math.min(535/sw,782/sh,1),w=sw*fit*z,h=sh*fit*z,cx=placedRect?placedRect.x+placedRect.w/2:297.5,cy=placedRect?placedRect.y+placedRect.h/2:421;placedRect={x:Math.max(0,Math.min(595-w,cx-w/2)),y:Math.max(0,Math.min(842-h,cy-h/2)),w,h};$('crop-zoom-label').textContent=$('crop-zoom').value+'%';preview()});
-$('a4-place').addEventListener('click',placeOnA4);$('a4-place-pdf').addEventListener('click',placeOnA4);
+$('action-a4-place').addEventListener('click',placeOnA4);
 $('reset').addEventListener('click',()=>{crop=null;a4Mode=false;placedRect=null;$('crop-zoom').disabled=true;$('crop-zoom').value=100;$('crop-zoom-label').textContent='100%';preview();say('Обрезка сброшена.')});
 $('clear').addEventListener('click',()=>{file=null;image=null;work=null;pdfBytes=null;crop=null;a4Mode=false;placedRect=null;rotation=0;mirrorX=false;pdfRotation=0;$('crop-zoom').disabled=true;$('crop-zoom').value=100;$('crop-zoom-label').textContent='100%';$('file').value='';$('save').disabled=true;$('reset').disabled=true;$('clear').disabled=true;preview();say('Файл очищен.')});
 $('drop').addEventListener('dragover',e=>{e.preventDefault();$('drop').style.borderColor='#0071e3'});$('drop').addEventListener('dragleave',()=>$('drop').style.borderColor='');$('drop').addEventListener('drop',e=>{e.preventDefault();$('drop').style.borderColor='';const f=e.dataTransfer.files[0];if(f)load(f).catch(err=>say(err.message,'err'))});
