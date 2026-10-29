@@ -1,28 +1,162 @@
 from __future__ import annotations
 
-"""Small local bridge for DocuDesk Web -> Canon MF440 Series eSCL.
+"""Local eSCL bridge for DocuDesk Web and Canon MF440 Series.
 
-Binds to loopback only. It exposes only health and scanner-capabilities checks
-in this first milestone; scan-job creation/download will be added after this
-connection test is verified.
+The service binds to loopback only and exposes a fixed set of scanner operations.
+It is intentionally not a general-purpose HTTP proxy.
 """
 
-import json
+import base64
 import http.client
+import json
+import time
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 HOST = "127.0.0.1"
 PORT = 8765
 PRINTER_HOST = "192.168.5.180"
 PRINTER_PORT = 80
+PRINTER_BASE = f"http://{PRINTER_HOST}:{PRINTER_PORT}"
 ALLOWED_ORIGIN = "https://lomakobodiakov.github.io"
 CAPABILITIES_PATH = "/eSCL/ScannerCapabilities"
+SCAN_JOBS_PATH = "/eSCL/ScanJobs"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_SCAN_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_SCAN_PAGES = 20
+ALLOWED_SOURCES = {"Platen", "Feeder"}
+ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
+ALLOWED_RESOLUTIONS = {150, 300, 600}
+PAPER_SIZES = {
+    "A4": (2480, 3508),
+    "Letter": (2550, 3300),
+    "Legal": (2550, 4200),
+}
+
+
+class ScannerError(Exception):
+    pass
+
+
+def printer_request(method: str, path: str, body: bytes | None = None,
+                    headers: dict[str, str] | None = None, timeout: int = 90):
+    conn = http.client.HTTPConnection(PRINTER_HOST, PRINTER_PORT, timeout=timeout)
+    try:
+        conn.request(method, path, body=body, headers=headers or {})
+        response = conn.getresponse()
+        data = response.read(MAX_SCAN_IMAGE_BYTES + 1 if method == "GET" and path.endswith("/NextDocument") else MAX_RESPONSE_BYTES + 1)
+        if len(data) > (MAX_SCAN_IMAGE_BYTES if method == "GET" and path.endswith("/NextDocument") else MAX_RESPONSE_BYTES):
+            raise ScannerError("Ответ сканера превышает допустимый размер.")
+        return response.status, dict(response.getheaders()), data
+    finally:
+        conn.close()
+
+
+def safe_job_url(location: str) -> str:
+    if not location:
+        raise ScannerError("МФУ создало задание без заголовка Location.")
+    candidate = urljoin(PRINTER_BASE + "/", location)
+    parsed = urlsplit(candidate)
+    if parsed.scheme != "http" or parsed.hostname != PRINTER_HOST or parsed.port not in (None, PRINTER_PORT):
+        raise ScannerError("МФУ вернуло неожиданный адрес задания сканирования.")
+    if not parsed.path.startswith("/eSCL/ScanJobs/"):
+        raise ScannerError("МФУ вернуло неожиданный путь задания сканирования.")
+    return candidate.rstrip("/")
+
+
+def make_scan_settings(source: str, color_mode: str, resolution: int, paper_size: str) -> bytes:
+    if source not in ALLOWED_SOURCES:
+        raise ScannerError("Источник должен быть Platen (стекло) или Feeder (автоподатчик).")
+    if color_mode not in ALLOWED_COLOR_MODES:
+        raise ScannerError("Неподдерживаемый режим цвета.")
+    if resolution not in ALLOWED_RESOLUTIONS:
+        raise ScannerError("Разрешение должно быть 150, 300 или 600 dpi.")
+    if paper_size not in PAPER_SIZES:
+        raise ScannerError("Неподдерживаемый формат бумаги.")
+    width, height = PAPER_SIZES[paper_size]
+    xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"
+ xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
+  <pwg:Version>2.0</pwg:Version>
+  <pwg:ScanRegions>
+    <pwg:ScanRegion>
+      <pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
+      <pwg:XOffset>0</pwg:XOffset>
+      <pwg:YOffset>0</pwg:YOffset>
+      <pwg:Width>{width}</pwg:Width>
+      <pwg:Height>{height}</pwg:Height>
+    </pwg:ScanRegion>
+  </pwg:ScanRegions>
+  <pwg:InputSource>{source}</pwg:InputSource>
+  <scan:ColorMode>{color_mode}</scan:ColorMode>
+  <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
+  <scan:XResolution>{resolution}</scan:XResolution>
+  <scan:YResolution>{resolution}</scan:YResolution>
+</scan:ScanSettings>'''
+    return xml.encode("utf-8")
+
+
+def scan_document(settings: bytes) -> list[dict]:
+    status, headers, data = printer_request(
+        "POST", SCAN_JOBS_PATH, settings,
+        {"Content-Type": "text/xml; charset=utf-8", "Accept": "application/xml, text/xml"},
+        timeout=20,
+    )
+    if status not in (200, 201):
+        detail = data.decode("utf-8", errors="replace")[:500]
+        raise ScannerError(f"МФУ отклонило задание (HTTP {status}). {detail}")
+    location = next((v for k, v in headers.items() if k.lower() == "location"), "")
+    job_url = safe_job_url(location)
+    job_path = urlsplit(job_url).path
+    pages = []
+    try:
+        for page_index in range(MAX_SCAN_PAGES):
+            page_status = None
+            page_headers: dict[str, str] = {}
+            page_data = b""
+            # Some scanners return 503 briefly while the next page is being prepared.
+            for attempt in range(90):
+                page_status, page_headers, page_data = printer_request(
+                    "GET", job_path + "/NextDocument",
+                    headers={"Accept": "image/jpeg, image/png, application/octet-stream"},
+                    timeout=90,
+                )
+                if page_status == 503:
+                    time.sleep(1)
+                    continue
+                break
+            if page_status in (404, 410):
+                if not pages:
+                    raise ScannerError("Сканер завершил задание, но не вернул изображение. Проверьте бумагу и источник.")
+                break
+            if page_status != 200:
+                detail = page_data.decode("utf-8", errors="replace")[:300]
+                raise ScannerError(f"Не удалось получить страницу {page_index + 1} (HTTP {page_status}). {detail}")
+            if not page_data:
+                raise ScannerError(f"Сканер вернул пустую страницу №{page_index + 1}.")
+            content_type = next((v.split(";")[0].strip().lower() for k, v in page_headers.items()
+                                 if k.lower() == "content-type"), "image/jpeg")
+            if content_type not in ("image/jpeg", "image/png"):
+                raise ScannerError(f"Формат изображения {content_type} пока не поддерживается в PDF DocuDesk.")
+            pages.append({
+                "name": f"scan_{page_index + 1:03d}.jpg" if content_type == "image/jpeg" else f"scan_{page_index + 1:03d}.png",
+                "content_type": content_type,
+                "size": len(page_data),
+                "data": base64.b64encode(page_data).decode("ascii"),
+            })
+            if len(pages) >= MAX_SCAN_PAGES:
+                break
+    finally:
+        try:
+            printer_request("DELETE", job_path, headers={"Accept": "*/*"}, timeout=5)
+        except Exception:
+            pass
+    return pages
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "DocuDeskLocalBridge/0.1"
+    server_version = "DocuDeskLocalBridge/0.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print("[DocuDesk Bridge] " + (fmt % args))
@@ -33,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin == ALLOWED_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -46,6 +180,10 @@ class Handler(BaseHTTPRequestHandler):
         self._headers(status)
         self.wfile.write(body)
 
+    def _origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        return not origin or origin == ALLOWED_ORIGIN
+
     def do_OPTIONS(self) -> None:
         if self.headers.get("Origin", "") != ALLOWED_ORIGIN:
             self._json(403, {"ok": False, "error": "Origin not allowed"})
@@ -53,52 +191,70 @@ class Handler(BaseHTTPRequestHandler):
         self._headers(204)
 
     def do_GET(self) -> None:
-        origin = self.headers.get("Origin", "")
-        if origin and origin != ALLOWED_ORIGIN:
+        if not self._origin_allowed():
             self._json(403, {"ok": False, "error": "Origin not allowed"})
             return
-
         path = urlsplit(self.path).path
         if path == "/health":
-            self._json(200, {"ok": True, "service": "DocuDesk Local Bridge", "version": "0.1"})
+            self._json(200, {"ok": True, "service": "DocuDesk Local Bridge", "version": "0.2"})
             return
-        if path != "/capabilities":
+        if path == "/capabilities":
+            try:
+                status, _, data = printer_request(
+                    "GET", CAPABILITIES_PATH,
+                    headers={"Accept": "application/xml, text/xml"}, timeout=8,
+                )
+                if status != 200 or b"ScannerCapabilities" not in data:
+                    self._json(502, {"ok": False, "error": f"Некорректный ответ сканера (HTTP {status})."})
+                    return
+                try:
+                    root = ET.fromstring(data)
+                    sources = sorted({el.text.strip() for el in root.iter()
+                                      if el.tag.split("}")[-1] == "InputSource" and el.text and el.text.strip()})
+                except ET.ParseError:
+                    sources = []
+                self._json(200, {
+                    "ok": True, "printer": "Canon MF440 Series",
+                    "address": PRINTER_BASE, "protocol": "eSCL",
+                    "message": "Printer responded with ScannerCapabilities XML",
+                    "sources": sources, "xml": data.decode("utf-8", errors="replace"),
+                })
+            except (OSError, TimeoutError, http.client.HTTPException, ScannerError) as exc:
+                self._json(502, {"ok": False, "error": f"Не удалось получить возможности сканера: {exc}"})
+            return
+        self._json(404, {"ok": False, "error": "Not found"})
+
+    def do_POST(self) -> None:
+        if not self._origin_allowed():
+            self._json(403, {"ok": False, "error": "Origin not allowed"})
+            return
+        if urlsplit(self.path).path != "/scan":
             self._json(404, {"ok": False, "error": "Not found"})
             return
-
-        conn = http.client.HTTPConnection(PRINTER_HOST, PRINTER_PORT, timeout=8)
         try:
-            conn.request("GET", CAPABILITIES_PATH, headers={"Accept": "application/xml, text/xml"})
-            response = conn.getresponse()
-            data = response.read(MAX_RESPONSE_BYTES + 1)
-            if len(data) > MAX_RESPONSE_BYTES:
-                self._json(502, {"ok": False, "error": "Scanner response is too large"})
-                return
-            if response.status != 200:
-                self._json(502, {"ok": False, "error": f"Printer returned HTTP {response.status}"})
-                return
-            if b"ScannerCapabilities" not in data:
-                self._json(502, {"ok": False, "error": "Printer response is not eSCL ScannerCapabilities XML"})
-                return
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 1 or length > 16 * 1024:
+                raise ScannerError("Некорректный размер запроса.")
+            request_data = json.loads(self.rfile.read(length).decode("utf-8"))
+            source = request_data.get("source", "Platen")
+            color_mode = request_data.get("colorMode", "RGB24")
+            resolution = int(request_data.get("resolution", 300))
+            paper_size = request_data.get("paperSize", "A4")
+            settings = make_scan_settings(source, color_mode, resolution, paper_size)
             self._json(200, {
-                "ok": True,
-                "printer": "Canon MF440 Series",
-                "address": f"http://{PRINTER_HOST}",
-                "protocol": "eSCL",
-                "message": "Printer responded with ScannerCapabilities XML",
-                "xml": data.decode("utf-8", errors="replace"),
+                "ok": True, "printer": "Canon MF440 Series",
+                "pages": scan_document(settings),
             })
-        except (OSError, TimeoutError, http.client.HTTPException) as exc:
-            self._json(502, {"ok": False, "error": f"Cannot contact scanner: {exc}"})
-        finally:
-            conn.close()
+        except (ValueError, TypeError, json.JSONDecodeError, ScannerError,
+                OSError, TimeoutError, http.client.HTTPException) as exc:
+            self._json(502, {"ok": False, "error": str(exc) or "Ошибка сканирования."})
 
 
 if __name__ == "__main__":
-    print("DocuDesk Local Bridge 0.1")
-    print(f"Printer: http://{PRINTER_HOST}{CAPABILITIES_PATH}")
+    print("DocuDesk Local Bridge 0.2")
+    print(f"Printer: {PRINTER_BASE}{CAPABILITIES_PATH}")
     print(f"Local endpoint: http://{HOST}:{PORT}")
-    print("Keep this window open while using the scanner test. Close it to stop the bridge.")
+    print("Keep this window open while using the scanner. Close it to stop the bridge.")
     try:
         ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
     except KeyboardInterrupt:
