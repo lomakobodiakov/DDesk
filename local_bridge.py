@@ -161,30 +161,44 @@ def scan_document(settings: bytes) -> list[dict]:
     return pages
 
 
-def list_wia_scanners() -> list[dict]:
-    """Enumerate scanner devices exposed by Windows WIA; unavailable on non-Windows systems."""
+def list_wia_scanners() -> tuple[list[dict], str | None]:
+    """Enumerate Windows WIA scanners and retain diagnostics for the UI."""
     if os.name != "nt":
-        return []
+        return [], "USB-сканирование через WIA доступно только в Windows."
     try:
         import win32com.client
-        manager = win32com.client.Dispatch("WIA.DeviceManager")
+    except ImportError:
+        return [], "Не установлен pywin32: закройте помощник и запустите start_local_bridge.bat — он установит компонент автоматически."
+    try:
+        try:
+            manager = win32com.client.Dispatch("WIA.DeviceManager")
+        except Exception:
+            manager = win32com.client.gencache.EnsureDispatch("WIA.DeviceManager")
         devices = []
+        item_errors = []
         for info in manager.DeviceInfos:
             try:
                 if int(info.Type) != 1:
                     continue
-                name = "Сканер"
+                name = "Сканер Windows"
                 device_id = str(info.DeviceID)
                 for prop in info.Properties:
-                    if str(prop.Name).lower() == "name":
-                        name = str(prop.Value)
-                        break
+                    try:
+                        if str(prop.Name).lower() == "name":
+                            name = str(prop.Value)
+                            break
+                    except Exception:
+                        continue
                 devices.append({"id": "wia:" + device_id, "name": name, "connection": "Windows WIA"})
-            except Exception:
-                continue
-        return devices
-    except Exception:
-        return []
+            except Exception as exc:
+                item_errors.append(str(exc))
+        if devices:
+            return devices, None
+        if item_errors:
+            return [], "Windows WIA запустился, но не смог прочитать устройства. Проверьте драйвер сканера HP."
+        return [], "Windows WIA не обнаружил сканеры. Установите полный драйвер HP Laser MFP 135w с поддержкой WIA/TWAIN и перезапустите помощник."
+    except Exception as exc:
+        return [], "Не удалось обратиться к Windows WIA: " + str(exc)
 
 
 def scan_wia_one_page(device_id: str, color_mode: str, resolution: int) -> list[dict]:
@@ -272,9 +286,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "service": "DocuDesk Local Bridge", "version": "0.2"})
             return
         if path == "/devices":
-            devices = list_wia_scanners()
+            devices, scanner_warning = list_wia_scanners()
             devices.append({"id": "escl:canon-mf440", "name": "Canon MF440 Series (сеть eSCL)", "connection": "eSCL", "address": PRINTER_HOST})
-            self._json(200, {"ok": True, "devices": devices})
+            self._json(200, {"ok": True, "devices": devices, "scannerWarning": scanner_warning})
             return
         if path == "/capabilities":
             try:
