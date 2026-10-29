@@ -18,7 +18,7 @@
  <div class="options" id="image-options">
   <label for="angle">Устранение перекоса: <span id="angle-label">0.0°</span></label>
   <input id="angle" class="range" type="range" min="-8" max="8" step="0.1" value="0">
-  <div class="controls"><button class="btn secondary" id="auto">Автоматически выровнять</button><button class="btn secondary" id="angle-reset">Сбросить угол</button><button class="btn secondary" id="rotate180">Повернуть на 180°</button><button class="btn secondary" id="mirror">Отзеркалить</button><button class="btn secondary" id="a4-place">Разместить выделение на A4</button></div>
+  <div class="controls"><button class="btn secondary" id="auto">Автоматически выровнять</button><button class="btn secondary" id="angle-reset">Сбросить угол</button><button class="btn secondary" id="rotate90-left">↶ Повернуть на 90°</button><button class="btn secondary" id="rotate90-right">↷ Повернуть на 90°</button><button class="btn secondary" id="rotate180">Повернуть на 180°</button><button class="btn secondary" id="mirror">Отзеркалить</button><button class="btn secondary" id="a4-place">Разместить выделение на A4</button></div>
   <div class="top" style="margin:14px 0 4px">
    <div style="flex:1;min-width:190px"><label for="brightness">Яркость: <span id="brightness-label">100%</span></label><input id="brightness" class="range" type="range" min="50" max="150" step="1" value="100"></div>
    <div style="flex:1;min-width:190px"><label for="contrast">Контрастность: <span id="contrast-label">100%</span></label><input id="contrast" class="range" type="range" min="50" max="150" step="1" value="100"></div>
@@ -99,7 +99,7 @@ async function runAutoDeskew(){
 $('auto').addEventListener('click',runAutoDeskew);
 
 function rotateBy(deg){rotation=(rotation+deg+360)%360;pdfRotation=rotation;if(image)renderImage();say('Поворот: '+rotation+'°')}
-$('left').addEventListener('click',()=>rotateBy(-90));$('right').addEventListener('click',()=>rotateBy(90));$('rotate180').addEventListener('click',()=>rotateBy(180));$('rotate180-pdf').addEventListener('click',()=>rotateBy(180));
+$('left').addEventListener('click',()=>rotateBy(-90));$('right').addEventListener('click',()=>rotateBy(90));$('rotate90-left').addEventListener('click',()=>rotateBy(-90));$('rotate90-right').addEventListener('click',()=>rotateBy(90));$('rotate180').addEventListener('click',()=>rotateBy(180));$('rotate180-pdf').addEventListener('click',()=>rotateBy(180));
 function flipImage(){mirrorX=!mirrorX;if(image)renderImage();say(mirrorX?'Зеркальное отражение включено.':'Зеркальное отражение отключено.')}
 $('mirror').addEventListener('click',flipImage);$('mirror-pdf').addEventListener('click',flipImage);
 function placeOnA4(){if(!crop){say('Сначала выделите область для обрезки.','err');return}a4Mode=true;placedRect=null;preview();say('Выделение размещено на листе A4. Перетаскивайте его мышью или пальцем.','ok')}
