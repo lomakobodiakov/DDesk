@@ -353,7 +353,11 @@ async function refreshScannerDevices(){
    select.append(option);
   });
   if([...select.options].some(option=>option.value===previous))select.value=previous;
-  status('scanner','Найдено устройств: '+select.options.length+'. Выбери нужный сканер и нажми «Сканировать».','ok');
+  if(result.scannerWarning){
+   status('scanner','Список устройств обновлён, но USB-сканер не найден: '+result.scannerWarning,'err');
+  }else{
+   status('scanner','Найдено устройств: '+select.options.length+'. Выбери нужный сканер и нажми «Сканировать».','ok');
+  }
  }catch(e){
   console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
  }
