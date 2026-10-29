@@ -29,9 +29,9 @@ ALLOWED_SOURCES = {"Platen", "Feeder"}
 ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
 ALLOWED_RESOLUTIONS = {150, 300, 600}
 PAPER_SIZES = {
-    "A4": (827, 1169),
-    "Letter": (850, 1100),
-    "Legal": (850, 1400),
+    "A4": (2480, 3508),
+    "Letter": (2550, 3300),
+    "Legal": (2550, 4200),
 }
 
 
