@@ -162,13 +162,17 @@ def scan_document(settings: bytes) -> list[dict]:
 
 
 def list_wia_scanners() -> tuple[list[dict], str | None]:
-    """Enumerate Windows WIA scanners and retain diagnostics for the UI."""
+    """Enumerate Windows WIA scanners on this worker thread."""
     if os.name != "nt":
         return [], "USB-сканирование через WIA доступно только в Windows."
     try:
+        import pythoncom
         import win32com.client
     except ImportError:
         return [], "Не установлен pywin32: закройте помощник и запустите start_local_bridge.bat — он установит компонент автоматически."
+
+    # HTTP requests run on separate threads; each COM-using thread must initialize COM.
+    pythoncom.CoInitialize()
     try:
         try:
             manager = win32com.client.Dispatch("WIA.DeviceManager")
@@ -199,46 +203,57 @@ def list_wia_scanners() -> tuple[list[dict], str | None]:
         return [], "Windows WIA не обнаружил сканеры. Установите полный драйвер HP Laser MFP 135w с поддержкой WIA/TWAIN и перезапустите помощник."
     except Exception as exc:
         return [], "Не удалось обратиться к Windows WIA: " + str(exc)
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def scan_wia_one_page(device_id: str, color_mode: str, resolution: int) -> list[dict]:
-    """Scan one page through a Windows WIA device and return a browser-ready image."""
+    """Scan one page through a Windows WIA device on this worker thread."""
     if os.name != "nt":
         raise ScannerError("USB/WIA-сканирование доступно только в Windows.")
     try:
+        import pythoncom
         import win32com.client
         from PIL import Image
     except ImportError as exc:
         raise ScannerError("Для USB-сканирования нужны pywin32 и Pillow. Переустановите зависимости помощника.") from exc
-    raw_id = device_id.removeprefix("wia:")
-    manager = win32com.client.Dispatch("WIA.DeviceManager")
-    selected = None
-    for info in manager.DeviceInfos:
-        if str(info.DeviceID) == raw_id:
-            selected = info
-            break
-    if selected is None:
-        raise ScannerError("Выбранный сканер Windows не найден. Нажмите «Обновить устройства».")
+
+    pythoncom.CoInitialize()
     try:
-        item = selected.Connect().Items(1)
-        for prop_id, value in ((6147, resolution), (6148, resolution), (6146, 1 if color_mode == "RGB24" else 2 if color_mode == "Grayscale8" else 4)):
-            try:
-                item.Properties(str(prop_id)).Value = value
-            except Exception:
-                pass
-        transfer = item.Transfer()
-        with tempfile.TemporaryDirectory(prefix="docudesk-wia-") as folder:
-            raw_path = os.path.join(folder, "scan.bmp")
-            transfer.SaveFile(raw_path)
-            with Image.open(raw_path) as scanned:
-                from io import BytesIO
-                output = BytesIO()
-                scanned.convert("RGB").save(output, format="JPEG", quality=94)
-                data = output.getvalue()
-        return [{"name": "scan_001.jpg", "content_type": "image/jpeg", "size": len(data),
-                 "data": base64.b64encode(data).decode("ascii")}]
-    except Exception as exc:
-        raise ScannerError("Windows не смог выполнить сканирование этим устройством: " + str(exc)) from exc
+        raw_id = device_id.removeprefix("wia:")
+        manager = win32com.client.Dispatch("WIA.DeviceManager")
+        selected = None
+        for info in manager.DeviceInfos:
+            if str(info.DeviceID) == raw_id:
+                selected = info
+                break
+        if selected is None:
+            raise ScannerError("Выбранный сканер Windows не найден. Нажмите «Обновить устройства».")
+
+        try:
+            item = selected.Connect().Items(1)
+            for prop_id, value in ((6147, resolution), (6148, resolution), (6146, 1 if color_mode == "RGB24" else 2 if color_mode == "Grayscale8" else 4)):
+                try:
+                    item.Properties(str(prop_id)).Value = value
+                except Exception:
+                    pass
+            transfer = item.Transfer()
+            with tempfile.TemporaryDirectory(prefix="docudesk-wia-") as folder:
+                raw_path = os.path.join(folder, "scan.bmp")
+                transfer.SaveFile(raw_path)
+                with Image.open(raw_path) as scanned:
+                    from io import BytesIO
+                    output = BytesIO()
+                    scanned.convert("RGB").save(output, format="JPEG", quality=94)
+                    data = output.getvalue()
+            return [{"name": "scan_001.jpg", "content_type": "image/jpeg", "size": len(data),
+                     "data": base64.b64encode(data).decode("ascii")}]
+        except ScannerError:
+            raise
+        except Exception as exc:
+            raise ScannerError("Windows не смог выполнить сканирование этим устройством: " + str(exc)) from exc
+    finally:
+        pythoncom.CoUninitialize()
 
 
 class Handler(BaseHTTPRequestHandler):
