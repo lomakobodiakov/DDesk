@@ -144,6 +144,15 @@ body{min-height:100vh}
  <div><label for="scan-dpi" class="muted">Разрешение</label><select id="scan-dpi" class="field" style="width:100%;margin-top:6px"><option value="150">150 dpi — быстрее</option><option value="300" selected>300 dpi — рекомендуется</option><option value="600">600 dpi — подробнее</option></select></div>
 </div>
 <div class="controls"><button class="btn secondary" id="scanner-check">Проверить подключение</button><button class="btn" id="scanner-start">Сканировать</button><button class="btn secondary" id="scanner-clear" disabled>Очистить страницы</button></div>
+<div id="phone-scan-panel" style="margin-top:16px;padding:16px;border:1px dashed var(--line);border-radius:14px;background:#fafbfc">
+ <div style="font-weight:700">Нет сканера? Используй телефон</div>
+ <p class="muted" style="margin:5px 0 12px;font-size:13px">Подключи телефон и компьютер к одной Wi‑Fi сети. Отсканируй QR-код, чтобы открыть камеру телефона и передавать страницы на компьютер.</p>
+ <button class="btn secondary" id="phone-scan-start" type="button">Сканировать с телефона</button>
+ <div id="phone-scan-connect" hidden style="margin-top:14px;grid-template-columns:150px 1fr;gap:14px;align-items:center">
+  <div id="phone-scan-qr" style="background:#fff;padding:8px;border-radius:10px;width:150px;height:150px"></div>
+  <div><div id="phone-scan-link" style="font-size:12px;overflow-wrap:anywhere"></div><button class="btn secondary" id="phone-scan-stop" type="button" style="margin-top:10px">Завершить подключение</button></div>
+ </div>
+</div>
 <div class="status" id="scanner-status" aria-live="polite">Запусти start_local_bridge.bat и оставь окно открытым. Сначала проверь подключение, затем нажми «Сканировать».</div>
 <div id="scan-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:16px"></div>
 <div class="controls"><button class="btn" id="scanner-pdf" disabled>Сохранить все страницы в PDF</button><button class="btn secondary" id="scanner-edit" disabled>Редактировать PDF</button></div>
@@ -152,6 +161,7 @@ body{min-height:100vh}
 <div class="foot">DocuDesk Web · Файлы не отправляются на сервер приложения. Для работы используются библиотеки PDF.js, pdf-lib и JSZip с CDN.</div>
 </div>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
@@ -499,6 +509,45 @@ $('ocr-go').onclick=()=>run('ocr',async()=>{
 });
 const scanBridge='http://127.0.0.1:8765';
 let scannedPages=[];
+let phoneScanToken='',phoneScanTimer=null;
+async function stopPhoneScan(){
+ if(phoneScanTimer){clearInterval(phoneScanTimer);phoneScanTimer=null}
+ if(phoneScanToken){try{await fetch(scanBridge+'/mobile/stop?token='+encodeURIComponent(phoneScanToken),{method:'POST'})}catch(e){}}
+ phoneScanToken='';
+ $('phone-scan-connect').hidden=true;
+ $('phone-scan-connect').style.display='none';
+ $('phone-scan-qr').innerHTML='';
+ $('phone-scan-start').disabled=false;
+}
+async function pollPhoneScan(){
+ if(!phoneScanToken)return;
+ try{
+  const response=await fetch(scanBridge+'/mobile/poll?token='+encodeURIComponent(phoneScanToken),{cache:'no-store'});
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.error||'Сеанс телефона завершён.');
+  if(Array.isArray(result.pages)&&result.pages.length){
+   const incoming=result.pages.map(page=>{const raw=atob(page.data),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return {name:page.name,contentType:page.content_type,bytes,size:page.size,url:URL.createObjectURL(new Blob([bytes],{type:page.content_type}))}});
+   scannedPages.push(...incoming);renderScannedPages();
+   status('scanner','С телефона получено страниц: '+incoming.length+'. Всего в документе: '+scannedPages.length+'.','ok');
+  }
+ }catch(e){console.error(e);status('scanner','Связь с телефоном прервана: '+e.message,'err');await stopPhoneScan()}
+}
+$('phone-scan-start').onclick=async()=>{
+ const button=$('phone-scan-start');button.disabled=true;
+ try{
+  const response=await fetch(scanBridge+'/mobile/start',{method:'POST'});
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.error||'Не удалось создать подключение.');
+  phoneScanToken=result.token;
+  $('phone-scan-connect').hidden=false;$('phone-scan-connect').style.display='grid';
+  $('phone-scan-link').textContent='Отсканируй QR-код камерой телефона. Если QR не считывается, открой ссылку вручную: '+result.url;
+  if(!window.QRCode)throw new Error('QR-библиотека не загрузилась. Ссылку можно открыть вручную.');
+  new QRCode($('phone-scan-qr'),{text:result.url,width:134,height:134,correctLevel:QRCode.CorrectLevel.M});
+  status('scanner','Ожидаем фотографии с телефона. Телефон и компьютер должны быть в одной Wi‑Fi сети.','ok');
+  phoneScanTimer=setInterval(pollPhoneScan,1500);
+ }catch(e){console.error(e);status('scanner','Не удалось подключить телефон: '+e.message+'. Проверь брандмауэр Windows и доступ локальной сети.','err');button.disabled=false}
+};
+$('phone-scan-stop').onclick=stopPhoneScan;
 function renderScannedPages(){
  const wrap=$('scan-results');wrap.innerHTML='';
  scannedPages.forEach((page,index)=>{
