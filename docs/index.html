@@ -576,6 +576,7 @@ async function refreshScannerDevices(){
    select.append(option);
   });
   if([...select.options].some(option=>option.value===previous))select.value=previous;
+  $('phone-scan-panel').style.display=select.options.length?'none':'block';
   updateScannerSourceOptions();
   if(select.options.length){
    const warnings=[result.scannerWarning,result.networkWarning].filter(Boolean).join(' ');
@@ -584,6 +585,7 @@ async function refreshScannerDevices(){
    status('scanner','Сканеры не обнаружены. '+[result.scannerWarning,result.networkWarning].filter(Boolean).join(' '),'err');
   }
  }catch(e){
+  $('phone-scan-panel').style.display='block';
   console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
  }
 }
