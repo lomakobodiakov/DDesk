@@ -556,19 +556,25 @@ $('phone-camera-open').onclick=()=>{$('phone-camera-panel').style.display='block
 $('phone-camera-close').onclick=()=>{stopPhoneCamera();$('phone-camera-panel').style.display='none'};
 $('phone-camera-start').onclick=async()=>{
  try{
-  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает камеру. Откройте сайт по HTTPS в Safari или Chrome.');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Камера недоступна в этом браузере. Откройте сайт по HTTPS в Safari.');
   stopPhoneCamera();
-  $('phone-camera-status').textContent='Запускаем камеру и загружаем обработку документов…';
-  const cvReady=loadPhoneCameraCV();
-  phoneCameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}}});
-  const video=$('phone-camera-video');video.srcObject=phoneCameraStream;await video.play();
-  await cvReady;
-  $('phone-camera-preview').style.display='none';video.style.display='block';
+  const panel=$('phone-camera-panel'),video=$('phone-camera-video');
+  panel.style.display='block';video.style.display='block';$('phone-camera-preview').style.display='none';
+  $('phone-camera-status').textContent='Запрашиваем доступ к камере…';
+  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}}});
+  phoneCameraStream=stream;video.muted=true;video.autoplay=true;video.playsInline=true;video.setAttribute('playsinline','');video.srcObject=stream;
+  await video.play();
   $('phone-camera-capture').disabled=false;$('phone-camera-retake').style.display='none';$('phone-camera-add').style.display='none';$('phone-camera-add').disabled=false;
-  $('phone-camera-status').textContent='Наведите камеру на лист целиком. Ищем границы документа…';$('phone-camera-status').className='status';
-  phoneCameraLastCheck=0;phoneCameraStable=0;phoneCameraBusy=false;
-  phoneCameraLoop=requestAnimationFrame(phoneCameraDetectLoop);
- }catch(e){stopPhoneCamera();$('phone-camera-status').textContent='Не удалось запустить сканирование: '+(e.message||e);$('phone-camera-status').className='status err'}
+  $('phone-camera-status').textContent='Камера включена. Можно сразу нажать «Сканировать сейчас вручную». Подготовка автообрезки выполняется отдельно.';$('phone-camera-status').className='status ok';
+  loadPhoneCameraCV().then(()=>{
+   if(phoneCameraStream!==stream)return;
+   $('phone-camera-status').textContent='Камера включена. Наведите её на лист — автоматически найдём границы документа.';$('phone-camera-status').className='status';
+   phoneCameraLastCheck=0;phoneCameraStable=0;phoneCameraBusy=false;phoneCameraLoop=requestAnimationFrame(phoneCameraDetectLoop);
+  }).catch(e=>{console.warn('Автообрезка недоступна:',e);if(phoneCameraStream===stream)$('phone-camera-status').textContent='Камера включена. Автообрезка недоступна, но снимок можно сделать вручную.'});
+ }catch(e){
+  console.error('Phone camera start failed:',e);stopPhoneCamera();
+  $('phone-camera-status').textContent='Не удалось включить камеру: '+(e.message||e);$('phone-camera-status').className='status err';
+ }
 };
 function orderDocumentCorners(points){
  const sum=p=>p.x+p.y,diff=p=>p.x-p.y;
