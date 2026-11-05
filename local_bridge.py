@@ -88,13 +88,22 @@ def discover_escl_scanners() -> list[dict]:
             self.items.append((name, base, label))
         def update_service(self, zc, service_type, name): self.add_service(zc, service_type, name)
         def remove_service(self, zc, service_type, name): pass
-    zc = Zeroconf()
     listener = Listener()
+    zc = None
     try:
+        # mDNS discovery is optional: a disconnected/unrouted network adapter
+        # must never prevent Windows WIA USB scanners from being listed.
+        zc = Zeroconf()
         browser = ServiceBrowser(zc, ["_uscan._tcp.local.", "_uscans._tcp.local."], listener)
-        time.sleep(3)
+        time.sleep(2)
+    except Exception as exc:
+        print("[DocuDesk Bridge] Network scanner discovery skipped:", exc)
     finally:
-        zc.close()
+        if zc is not None:
+            try:
+                zc.close()
+            except Exception:
+                pass
     for name, base, label in listener.items:
         device_id = "escl:" + quote(name, safe="")
         ESCL_DEVICES[device_id] = {"base": base, "name": label}
