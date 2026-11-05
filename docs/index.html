@@ -331,8 +331,8 @@ function setupNavigation(){
    }
   }
   if(!children.length)throw new Error('В PDF не удалось обнаружить ни текст, ни страницы для переноса.');
-  const document=new docx.Document({sections:[{children}]});
-  const blob=await docx.Packer.toBlob(document);download(blob,safeName(file.name)+'-converted.docx');
+  const docxDocument=new docx.Document({sections:[{children}]});
+  const blob=await docx.Packer.toBlob(docxDocument);download(blob,safeName(file.name)+'-converted.docx');
   convertStatus.textContent='DOCX создан. Текстовых страниц: '+textPages+'. Страниц, перенесённых как изображения: '+imagePages+'.';
  }
  async function convertPdfToPowerPoint(file){
