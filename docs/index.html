@@ -307,54 +307,102 @@ function setupNavigation(){
  convertDrop.addEventListener('click',e=>{if(e.target!==convertInput)convertInput.click()});convertDrop.addEventListener('dragover',e=>{e.preventDefault();convertDrop.classList.add('over')});convertDrop.addEventListener('dragleave',()=>convertDrop.classList.remove('over'));convertDrop.addEventListener('drop',e=>{e.preventDefault();convertDrop.classList.remove('over');const x=convertInfo[convertAction.value],a=Array.from(e.dataTransfer.files).filter(x.valid);if(!a.length){convertStatus.textContent='Выберите файл нужного формата.';convertStatus.className='status err';return}convertFiles=x.multiple?[...convertFiles,...a]:[a[0]];renderConvert()});
  convertClear.addEventListener('click',()=>{convertFiles=[];renderConvert();convertStatus.textContent='';convertStatus.className='status'});
  async function convertPdfToWord(file){
-  if(!window.docx||!window.pdfjsLib)throw new Error('Не удалось загрузить библиотеки PDF/DOCX. Проверьте подключение к интернету.');
+  if(!window.docx||!window.pdfjsLib)throw new Error('Не удалось загрузить библиотеки PDF/DOCX.');
   const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,children=[];
   const ocrEnabled=document.getElementById('pdfword-ocr-enabled').checked,ocrLang=document.getElementById('pdfword-ocr-lang').value;
-  let textPages=0,imagePages=0,ocrPages=0,worker=null;
+  let textPages=0,imagePages=0,ocrPages=0,tableCount=0,worker=null;
+  const makeParagraph=(line,pageWidth)=>{
+   const text=line.words.map(w=>w.text).join(' ').replace(/\s+/g,' ').trim();
+   if(!text)return null;
+   const left=Math.max(0,Math.round(line.x*15)),height=Math.max(16,Math.min(48,Math.round((line.height||16)*1.1)));
+   const center=Math.abs((line.x+(line.width||0)/2)-pageWidth/2)<pageWidth*.09;
+   const bold=(line.words.length===1&&text.length<100)||(line.height||0)>22;
+   const runs=line.words.map((w,i)=>new docx.TextRun({text:(i?' ':'')+w.text,bold:w.bold||bold&&i===0,size:Math.max(16,Math.min(32,Math.round((line.height||16)*1.25)))}));
+   return new docx.Paragraph({children:runs,alignment:center?docx.AlignmentType.CENTER:docx.AlignmentType.LEFT,indent:{left},spacing:{before:Math.max(0,Math.round((line.gapBefore||0)*8)),after:Math.max(40,Math.round((line.gapAfter||3)*8)),line:280}});
+  };
+  const appendStructuredLines=(lines,pageWidth)=>{
+   if(!lines.length)return;
+   // Detect repeated, aligned columns across adjacent lines and represent them as a real Word table.
+   const splitLine=line=>{
+    const cells=[];let current=[],lastRight=null;
+    for(const w of line.words){
+     if(lastRight!==null&&w.x-lastRight>Math.max(24,(line.height||14)*1.8)){cells.push(current);current=[]}
+     current.push(w);lastRight=w.x+(w.width||w.text.length*(line.height||14)*.45);
+    }
+    if(current.length)cells.push(current);
+    return cells;
+   };
+   const isRow=lines.map(l=>splitLine(l));
+   let i=0;
+   while(i<lines.length){
+    if(isRow[i].length>=2){
+     let j=i+1;
+     while(j<lines.length&&isRow[j].length>=2&&Math.abs(lines[j].y-lines[j-1].y)<Math.max(55,(lines[j].height||14)*3.8))j++;
+     if(j-i>=2){
+      const count=Math.max(...isRow.slice(i,j).map(x=>x.length));
+      const rows=isRow.slice(i,j).map(cells=>{
+       const padded=Array.from({length:count},(_,k)=>cells[k]||[]);
+       return new docx.TableRow({children:padded.map(cell=>new docx.TableCell({children:[new docx.Paragraph({children:[new docx.TextRun({text:cell.map(w=>w.text).join(' ')})]})],width:{size:Math.floor(100/count),type:docx.WidthType.PERCENTAGE}}))});
+      });
+      children.push(new docx.Table({rows,width:{size:100,type:docx.WidthType.PERCENTAGE},layout:docx.TableLayoutType.AUTOFIT}));
+      tableCount++;i=j;continue;
+     }
+    }
+    const p=makeParagraph(lines[i],pageWidth);if(p)children.push(p);i++;
+   }
+  };
   try{
    for(let i=1;i<=pdf.numPages;i++){
-    convertStatus.textContent='Обрабатываем страницу '+i+' из '+pdf.numPages+'…';
-    const page=await pdf.getPage(i),content=await page.getTextContent(),lines=new Map();
-    for(const item of content.items){if(!item.str||!item.str.trim())continue;const y=Math.round(item.transform[5]/3)*3;const line=lines.get(y)||[];line.push({x:item.transform[4],text:item.str});lines.set(y,line)}
-    const ordered=[...lines.entries()].sort((a,b)=>b[0]-a[0]),pageParagraphs=[];
-    for(const [,items] of ordered){items.sort((a,b)=>a.x-b.x);const lineText=items.map(x=>x.text).join(' ').replace(/\\s+/g,' ').trim();if(lineText)pageParagraphs.push(new docx.Paragraph({text:lineText}))}
-    if(i>1)children.push(new docx.Paragraph({children:[new docx.TextRun({text:'',break:1})]}));
-    if(pageParagraphs.length){
-     textPages++;children.push(...pageParagraphs);
-    }else{
-     const viewport=page.getViewport({scale:2}),canvas=document.createElement('canvas');
-     canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
-     await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-     let recognized='';
-     if(ocrEnabled){
-      if(!window.Tesseract)throw new Error('Не удалось загрузить OCR-модуль Tesseract.js. Проверьте подключение к интернету.');
-      if(!worker){
-       convertStatus.textContent='Загружаем языковую модель OCR…';
-       worker=await Tesseract.createWorker(ocrLang,1,{logger:m=>{if(m.status==='recognizing text')convertStatus.textContent='OCR, страница '+i+': '+Math.round((m.progress||0)*100)+'%'}});
-      }
-      convertStatus.textContent='Распознаём текст на странице '+i+' из '+pdf.numPages+'…';
-      const result=await worker.recognize(canvas);
-      recognized=(result.data.text||'').trim();
+    convertStatus.textContent='Анализируем структуру страницы '+i+' из '+pdf.numPages+'…';
+    const page=await pdf.getPage(i),viewport=page.getViewport({scale:1}),content=await page.getTextContent();
+    let lines=[];
+    if(content.items.some(item=>item.str&&item.str.trim())){
+     const map=new Map();
+     for(const item of content.items){
+      if(!item.str||!item.str.trim())continue;
+      const tr=item.transform||[1,0,0,1,0,0],y=Math.round(tr[5]/3)*3,key=y;
+      const arr=map.get(key)||[],fontHeight=Math.hypot(tr[2]||0,tr[3]||0)||Math.abs(tr[3])||12;
+      arr.push({x:tr[4],y:viewport.height-y,width:item.width||item.str.length*fontHeight*.45,height:fontHeight,text:item.str.trim()});map.set(key,arr);
      }
-     if(recognized){
-      ocrPages++;
-      recognized.split(/\\n+/).map(x=>x.trim()).filter(Boolean).forEach(line=>pageParagraphs.push(new docx.Paragraph({text:line})));
-      children.push(...pageParagraphs);
-     }else{
-      // Keep the original scanned page if OCR is disabled or finds no readable text.
-      const imageBlob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Не удалось преобразовать страницу '+i+' в изображение.')),'image/png'));
-      const imageBytes=new Uint8Array(await imageBlob.arrayBuffer()),ratio=Math.min(550/canvas.width,720/canvas.height);
-      children.push(new docx.Paragraph({children:[new docx.ImageRun({data:imageBytes,transformation:{width:Math.round(canvas.width*ratio),height:Math.round(canvas.height*ratio)}})]}));
-      imagePages++;
-     }
+     lines=[...map.entries()].sort((x,y)=>y[0]-x[0]).map(([y,words],idx,all)=>{
+      words.sort((x,y)=>x.x-y.x);const prev=all[idx-1],next=all[idx+1],height=Math.max(...words.map(w=>w.height));
+      return{x:words[0].x,y:viewport.height-y,width:Math.max(...words.map(w=>w.x+w.width))-words[0].x,height,words,gapBefore:prev?Math.max(0,(prev[0]-y)-height):0,gapAfter:next?Math.max(0,(y-next[0])-height):3};
+     });
+     textPages++;
+    }else if(ocrEnabled){
+     if(!window.Tesseract)throw new Error('Не удалось загрузить Tesseract.js.');
+     const scale=2,renderViewport=page.getViewport({scale}),canvas=document.createElement('canvas');
+     canvas.width=Math.ceil(renderViewport.width);canvas.height=Math.ceil(renderViewport.height);
+     await page.render({canvasContext:canvas.getContext('2d'),viewport:renderViewport}).promise;
+     if(!worker){convertStatus.textContent='Загружаем языковую модель OCR…';worker=await Tesseract.createWorker(ocrLang,1,{logger:m=>{if(m.status==='recognizing text')convertStatus.textContent='OCR, страница '+i+': '+Math.round((m.progress||0)*100)+'%'}})}
+     convertStatus.textContent='Распознаём текст и расположение блоков: '+i+'/'+pdf.numPages+'…';
+     const result=await worker.recognize(canvas),ocrLines=result.data.lines||[];
+     lines=ocrLines.map(line=>{
+      const words=(line.words||[]).map(w=>({text:(w.text||'').trim(),x:(w.bbox?.x0||0)/scale,y:(w.bbox?.y0||0)/scale,width:((w.bbox?.x1||0)-(w.bbox?.x0||0))/scale,height:((w.bbox?.y1||0)-(w.bbox?.y0||0))/scale,bold:false})).filter(w=>w.text);
+      const box=line.bbox||{};
+      return{x:(box.x0||0)/scale,y:(box.y0||0)/scale,width:((box.x1||0)-(box.x0||0))/scale,height:((box.y1||0)-(box.y0||0))/scale,words};
+     }).filter(line=>line.words.length);
      canvas.width=canvas.height=0;
+     if(lines.length)ocrPages++;
+    }
+    if(lines.length){
+     if(i>1)children.push(new docx.Paragraph({children:[new docx.TextRun({text:'',break:1})]}));
+     appendStructuredLines(lines,viewport.width);
+    }else{
+     const renderViewport=page.getViewport({scale:1.5}),canvas=document.createElement('canvas');
+     canvas.width=Math.ceil(renderViewport.width);canvas.height=Math.ceil(renderViewport.height);
+     await page.render({canvasContext:canvas.getContext('2d'),viewport:renderViewport}).promise;
+     const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Не удалось сохранить страницу '+i+'.')),'image/png'));
+     const data=new Uint8Array(await blob.arrayBuffer()),ratio=Math.min(550/canvas.width,720/canvas.height);
+     children.push(new docx.Paragraph({children:[new docx.ImageRun({data,transformation:{width:Math.round(canvas.width*ratio),height:Math.round(canvas.height*ratio)}})]}));
+     canvas.width=canvas.height=0;imagePages++;
     }
    }
   }finally{if(worker)await worker.terminate()}
-  if(!children.length)throw new Error('В PDF не удалось обнаружить ни текст, ни страницы для переноса.');
-  const docxDocument=new docx.Document({sections:[{children}]});
+  if(!children.length)throw new Error('В PDF не удалось обнаружить содержимое для переноса.');
+  const docxDocument=new docx.Document({sections:[{properties:{page:{margin:{top:720,right:720,bottom:720,left:720}}},children}]});
   const blob=await docx.Packer.toBlob(docxDocument);download(blob,safeName(file.name)+'-converted.docx');
-  convertStatus.textContent='DOCX создан. Текстовых страниц: '+textPages+'. Распознано OCR: '+ocrPages+'. Страниц оставлено изображениями: '+imagePages+'.';
+  convertStatus.textContent='DOCX создан. Текстовых страниц: '+textPages+'. OCR-страниц: '+ocrPages+'. Таблиц восстановлено приблизительно: '+tableCount+'. Страниц-изображений: '+imagePages+'.';
  }
  async function convertPdfToPowerPoint(file){
   if(!window.pdfjsLib)throw new Error('Не удалось загрузить PDF.js.');
