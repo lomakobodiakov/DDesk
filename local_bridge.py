@@ -393,32 +393,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/devices":
             devices, scanner_warning = list_wia_scanners()
-            devices.append({"id": "escl:canon-mf440", "name": "Canon MF440 Series (сеть eSCL)", "connection": "eSCL", "address": PRINTER_HOST})
-            self._json(200, {"ok": True, "devices": devices, "scannerWarning": scanner_warning})
+            network_devices = discover_escl_scanners()
+            devices.extend(network_devices)
+            self._json(200, {"ok": True, "devices": devices,
+                             "scannerWarning": scanner_warning,
+                             "networkWarning": None if network_devices else "Сетевые eSCL/AirScan устройства не обнаружены через Bonjour/mDNS."})
             return
         if path == "/capabilities":
+            device_id = unquote(urlsplit(self.path).query.removeprefix("device="))
+            device = ESCL_DEVICES.get(device_id)
+            if not device:
+                self._json(404, {"ok": False, "error": "Сначала обновите список сетевых сканеров."})
+                return
             try:
-                status, _, data = printer_request(
-                    "GET", CAPABILITIES_PATH,
-                    headers={"Accept": "application/xml, text/xml"}, timeout=8,
-                )
-                if status != 200 or b"ScannerCapabilities" not in data:
-                    self._json(502, {"ok": False, "error": f"Некорректный ответ сканера (HTTP {status})."})
-                    return
-                try:
-                    root = ET.fromstring(data)
-                    sources = sorted({el.text.strip() for el in root.iter()
-                                      if el.tag.split("}")[-1] == "InputSource" and el.text and el.text.strip()})
-                except ET.ParseError:
-                    sources = []
-                self._json(200, {
-                    "ok": True, "printer": "Canon MF440 Series",
-                    "address": PRINTER_BASE, "protocol": "eSCL",
-                    "message": "Printer responded with ScannerCapabilities XML",
-                    "sources": sources, "xml": data.decode("utf-8", errors="replace"),
-                })
-            except (OSError, TimeoutError, http.client.HTTPException, ScannerError) as exc:
-                self._json(502, {"ok": False, "error": f"Не удалось получить возможности сканера: {exc}"})
+                data, sources = escl_capabilities(device)
+                self._json(200, {"ok": True, "name": device["name"], "protocol": "eSCL",
+                                 "sources": sources, "xml": data.decode("utf-8", errors="replace")})
+            except (OSError, TimeoutError, http.client.HTTPException, ScannerError, ET.ParseError) as exc:
+                self._json(502, {"ok": False, "error": str(exc)})
             return
         self._json(404, {"ok": False, "error": "Not found"})
 
@@ -526,15 +518,15 @@ class Handler(BaseHTTPRequestHandler):
             paper_size = request_data.get("paperSize", "A4")
             if device_id.startswith("wia:"):
                 if source == "Feeder":
-                    raise ScannerError("Для устройств Windows WIA автоподатчик пока не поддерживается в этой версии. Выберите «Стекло» или устройство eSCL.")
+                    raise ScannerError("Автоподатчик WIA пока не поддерживается универсально для всех драйверов. Выберите стекло или сетевой eSCL-сканер.")
                 pages = scan_wia_one_page(device_id, color_mode, resolution)
-                self._json(200, {"ok": True, "printer": device_id[4:], "pages": pages})
-            elif device_id == "escl:canon-mf440":
-                settings = make_scan_settings(source, color_mode, resolution, paper_size)
-                self._json(200, {
-                    "ok": True, "printer": "Canon MF440 Series",
-                    "pages": scan_document(settings),
-                })
+                self._json(200, {"ok": True, "device": device_id, "pages": pages})
+            elif device_id.startswith("escl:"):
+                device = ESCL_DEVICES.get(device_id)
+                if not device:
+                    raise ScannerError("Сетевой сканер не найден. Нажмите «Обновить устройства».")
+                pages = scan_escl(device, source, color_mode, resolution, paper_size)
+                self._json(200, {"ok": True, "device": device_id, "pages": pages})
             else:
                 raise ScannerError("Неизвестное устройство сканирования. Обновите список устройств.")
         except (ValueError, TypeError, json.JSONDecodeError, ScannerError,
@@ -543,8 +535,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("DocuDesk Local Bridge 0.2")
-    print(f"Printer: {PRINTER_BASE}{CAPABILITIES_PATH}")
+    print("DocuDesk Local Bridge 0.3 — generic WIA + eSCL")
+    print("Discovery: Windows WIA and network eSCL/AirScan (Bonjour/mDNS)")
     print(f"Local endpoint: http://{HOST}:{PORT}")
     print("Keep this window open while using the scanner. Close it to stop the bridge.")
     try:
