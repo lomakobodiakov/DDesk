@@ -2,8 +2,7 @@ from __future__ import annotations
 
 """Local scanner bridge for DocuDesk Web.
 
-Discovers Windows WIA devices and network eSCL/AirScan scanners.
-The service binds to loopback only and is not a general-purpose HTTP proxy.
+Discovers Windows WIA/eSCL scanners and accepts paired phone photos over LAN.
 """
 
 import base64
@@ -12,6 +11,9 @@ import ipaddress
 import json
 import os
 import shutil
+import socket
+import secrets
+import threading
 import subprocess
 import tempfile
 import time
@@ -30,6 +32,9 @@ ALLOWED_SOURCES = {"Platen", "Feeder"}
 ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
 ALLOWED_RESOLUTIONS = {75, 100, 150, 200, 300, 600, 1200}
 ESCL_DEVICES: dict[str, dict] = {}
+MOBILE_SESSIONS: dict[str, list[dict]] = {}
+MOBILE_SESSION_LOCK = threading.Lock()
+MAX_MOBILE_IMAGE_BYTES = 12 * 1024 * 1024
 PAPER_SIZES = {
     "A4": (2480, 3508),
     "Letter": (2550, 3300),
@@ -270,6 +275,32 @@ def scan_wia_one_page(device_id: str, color_mode: str, resolution: int) -> list[
             raise ScannerError("Windows не смог выполнить сканирование этим устройством: " + str(exc)) from exc
     finally:
         pythoncom.CoUninitialize()
+
+
+def local_lan_ip() -> str:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))
+        return sock.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+
+
+MOBILE_PAGE = """<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DocuDesk — сканирование с телефона</title>
+<style>
+body{margin:0;padding:24px;background:#f4f6fa;color:#202938;font:16px/1.5 system-ui,sans-serif}.card{max-width:520px;margin:5vh auto;background:white;padding:24px;border-radius:20px}h1{font-size:24px}.pick{display:block;margin:24px 0;padding:20px;text-align:center;background:#d92d4a;color:white;border-radius:14px;font-weight:700;font-size:18px}input{position:absolute;width:1px;height:1px;opacity:0}#status{margin-top:18px;padding:12px;background:#f2f4f7;border-radius:10px}
+</style><div class="card"><h1>Сканирование с телефона</h1><p>Сделайте снимок документа. Можно добавить несколько страниц — они появятся на компьютере автоматически.</p>
+<label class="pick" for="camera">📷 Сфотографировать документ</label><input id="camera" type="file" accept="image/*" capture="environment" multiple>
+<div id="status">Подключено. Нажмите кнопку и сфотографируйте страницу.</div></div>
+<script>
+const token=new URLSearchParams(location.search).get('token'),input=document.getElementById('camera'),status=document.getElementById('status');
+if(!token){status.textContent='Нет кода подключения. Отсканируйте QR-код заново.';input.disabled=true}
+input.addEventListener('change',async()=>{const chosen=[...input.files];let done=0;for(const file of chosen){if(!/^image\\/(jpeg|png|webp)$/i.test(file.type)||file.size>12*1024*1024){status.textContent='Файл не поддерживается или больше 12 МБ.';continue}status.textContent='Отправляем фото '+(done+1)+' из '+chosen.length+'…';try{const response=await fetch('/mobile/upload?token='+encodeURIComponent(token),{method:'POST',headers:{'Content-Type':file.type},body:file}),result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'Ошибка');done++}catch(e){status.textContent='Ошибка отправки: '+e.message;break}}if(done)status.textContent='Отправлено страниц: '+done+'. Можно снимать следующие.';input.value=''});
+</script></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
