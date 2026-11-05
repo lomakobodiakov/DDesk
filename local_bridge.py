@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-"""Local eSCL bridge for DocuDesk Web and Canon MF440 Series.
+"""Local scanner bridge for DocuDesk Web.
 
-The service binds to loopback only and exposes a fixed set of scanner operations.
-It is intentionally not a general-purpose HTTP proxy.
+Discovers Windows WIA devices and network eSCL/AirScan scanners.
+The service binds to loopback only and is not a general-purpose HTTP proxy.
 """
 
 import base64
 import http.client
 import json
 import os
-import socket
 import shutil
 import subprocess
 import tempfile
@@ -43,7 +42,11 @@ class ScannerError(Exception):
 
 def escl_request(base_url: str, method: str, path: str, body: bytes | None = None,
                  headers: dict[str, str] | None = None, timeout: int = 90):
-    parsed = urlsplit(urljoin(base_url.rstrip("/") + "/", path.lstrip("/")))
+    if path.startswith("/"):
+        origin = urlsplit(base_url)
+        parsed = urlsplit(f"{origin.scheme}://{origin.netloc}{path}")
+    else:
+        parsed = urlsplit(urljoin(base_url.rstrip("/") + "/", path))
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ScannerError("Некорректный адрес сетевого сканера.")
     cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
@@ -88,8 +91,8 @@ def discover_escl_scanners() -> list[dict]:
     zc = Zeroconf()
     listener = Listener()
     try:
-        ServiceBrowser(zc, ["_uscan._tcp.local.", "_uscans._tcp.local."], listener)
-        time.sleep(2)
+        browser = ServiceBrowser(zc, ["_uscan._tcp.local.", "_uscans._tcp.local."], listener)
+        time.sleep(3)
     finally:
         zc.close()
     for name, base, label in listener.items:
