@@ -299,7 +299,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _origin_allowed(self) -> bool:
         origin = self.headers.get("Origin", "")
-        return not origin or origin == ALLOWED_ORIGIN
+        if not origin or origin == ALLOWED_ORIGIN:
+            return True
+        host = self.headers.get("Host", "")
+        return origin == "http://" + host and urlsplit(self.path).path.startswith("/mobile/")
 
     def do_OPTIONS(self) -> None:
         if self.headers.get("Origin", "") != ALLOWED_ORIGIN:
@@ -312,6 +315,30 @@ class Handler(BaseHTTPRequestHandler):
             self._json(403, {"ok": False, "error": "Origin not allowed"})
             return
         path = urlsplit(self.path).path
+        query = urlsplit(self.path).query
+        if path == "/mobile":
+            from urllib.parse import parse_qs
+            token = parse_qs(query).get("token", [""])[0]
+            with MOBILE_SESSION_LOCK:
+                valid = token in MOBILE_SESSIONS
+            if not valid:
+                self._headers(403, "text/plain; charset=utf-8")
+                self.wfile.write("Сеанс недействителен. Создайте новый QR-код.".encode("utf-8"))
+                return
+            self._headers(200, "text/html; charset=utf-8")
+            self.wfile.write(MOBILE_PAGE.encode("utf-8"))
+            return
+        if path == "/mobile/poll":
+            from urllib.parse import parse_qs
+            token = parse_qs(query).get("token", [""])[0]
+            with MOBILE_SESSION_LOCK:
+                if token not in MOBILE_SESSIONS:
+                    self._json(403, {"ok": False, "error": "Сеанс телефона завершён."})
+                    return
+                pages = MOBILE_SESSIONS[token][:]
+                MOBILE_SESSIONS[token].clear()
+            self._json(200, {"ok": True, "pages": pages})
+            return
         if path == "/health":
             self._json(200, {"ok": True, "service": "DocuDesk Local Bridge", "version": "0.2"})
             return
@@ -404,6 +431,55 @@ class Handler(BaseHTTPRequestHandler):
             self._json(403, {"ok": False, "error": "Origin not allowed"})
             return
         path = urlsplit(self.path).path
+        query = urlsplit(self.path).query
+        if path == "/mobile/start":
+            token = secrets.token_urlsafe(24)
+            with MOBILE_SESSION_LOCK:
+                MOBILE_SESSIONS[token] = []
+            ip = local_lan_ip()
+            if not ip:
+                with MOBILE_SESSION_LOCK:
+                    MOBILE_SESSIONS.pop(token, None)
+                self._json(503, {"ok": False, "error": "Не удалось определить IP компьютера в локальной сети."})
+                return
+            self._json(200, {"ok": True, "token": token, "url": f"http://{ip}:{PORT}/mobile?token={token}", "ip": ip})
+            return
+        if path == "/mobile/upload":
+            from urllib.parse import parse_qs
+            token = parse_qs(query).get("token", [""])[0]
+            with MOBILE_SESSION_LOCK:
+                valid = token in MOBILE_SESSIONS
+            if not valid:
+                self._json(403, {"ok": False, "error": "Сеанс истёк. Создайте новый QR-код."})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                mime = self.headers.get("Content-Type", "").split(";")[0].lower()
+                if mime not in ("image/jpeg", "image/png", "image/webp"):
+                    raise ScannerError("Разрешены только JPG, PNG и WebP.")
+                if length < 1 or length > MAX_MOBILE_IMAGE_BYTES:
+                    raise ScannerError("Размер фотографии должен быть не более 12 МБ.")
+                raw = self.rfile.read(length)
+                if not raw.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"RIFF")):
+                    raise ScannerError("Файл не распознан как изображение.")
+                item = {"name": "phone_scan", "content_type": mime, "size": len(raw), "data": base64.b64encode(raw).decode("ascii")}
+                with MOBILE_SESSION_LOCK:
+                    if token not in MOBILE_SESSIONS:
+                        raise ScannerError("Сеанс завершён.")
+                    if len(MOBILE_SESSIONS[token]) >= 20:
+                        raise ScannerError("В одном сеансе можно передать не более 20 страниц.")
+                    MOBILE_SESSIONS[token].append(item)
+                self._json(200, {"ok": True})
+            except (ValueError, ScannerError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
+        if path == "/mobile/stop":
+            from urllib.parse import parse_qs
+            token = parse_qs(query).get("token", [""])[0]
+            with MOBILE_SESSION_LOCK:
+                MOBILE_SESSIONS.pop(token, None)
+            self._json(200, {"ok": True})
+            return
         if path in ("/convert", "/pdfa"):
             try:
                 filename, data = self._read_upload()
@@ -461,11 +537,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("DocuDesk Local Bridge 0.4 — Windows WIA + eSCL/AirScan")
+    print("DocuDesk Local Bridge 0.5 — Windows WIA + eSCL/AirScan + Phone Scan")
     print("Discovery: Windows WIA and network eSCL/AirScan (Bonjour/mDNS)")
     print(f"Local endpoint: http://{HOST}:{PORT}")
     print("Keep this window open while using the scanner. Close it to stop the bridge.")
     try:
-        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+        ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nDocuDesk Local Bridge stopped.")
