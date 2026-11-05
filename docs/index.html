@@ -146,7 +146,7 @@ body{min-height:100vh}
 <div class="controls"><button class="btn secondary" id="scanner-check">Проверить подключение</button><button class="btn" id="scanner-start">Сканировать</button><button class="btn secondary" id="scanner-clear" disabled>Очистить страницы</button></div>
 <div class="status" id="scanner-status" aria-live="polite">Запусти start_local_bridge.bat и оставь окно открытым. Сначала проверь подключение, затем нажми «Сканировать».</div>
 <div id="scan-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:16px"></div>
-<div class="controls"><button class="btn" id="scanner-pdf" disabled>Сохранить все страницы в PDF</button></div>
+<div class="controls"><button class="btn" id="scanner-pdf" disabled>Сохранить все страницы в PDF</button><button class="btn secondary" id="scanner-edit" disabled>Редактировать PDF</button></div>
 </section>
 \n<div class="note"><strong>Ограничения браузерной версии:</strong> OCR распознаёт текст из PDF и изображений локально в браузере. USB-сканеры обнаруживаются через Windows WIA при наличии драйвера; сетевые — через eSCL/AirScan (Bonjour/mDNS). Поддержка зависит от драйвера и возможностей устройства. Word/Excel пока не конвертируются. Для больших документов может потребоваться больше оперативной памяти.</div>
 <div class="foot">DocuDesk Web · Файлы не отправляются на сервер приложения. Для работы используются библиотеки PDF.js, pdf-lib и JSZip с CDN.</div>
@@ -507,7 +507,7 @@ function renderScannedPages(){
   const label=document.createElement('div');label.textContent='Страница '+(index+1)+' · '+(page.size/1024).toFixed(0)+' KB';label.style.cssText='font-size:11px;color:var(--muted);margin-top:7px;overflow-wrap:anywhere';
   card.append(img,label);wrap.append(card);
  });
- $('scanner-pdf').disabled=!scannedPages.length;$('scanner-clear').disabled=!scannedPages.length;
+ $('scanner-pdf').disabled=!scannedPages.length;$('scanner-edit').disabled=!scannedPages.length;$('scanner-clear').disabled=!scannedPages.length;
 }
 async function refreshScannerDevices(){
  const select=$('scan-device'), previous=select.value;
@@ -571,6 +571,24 @@ $('scanner-start').onclick=async()=>{
  finally{$('scanner-start').disabled=false}
 };
 $('scanner-clear').onclick=()=>{scannedPages.forEach(p=>URL.revokeObjectURL(p.url));scannedPages=[];renderScannedPages();status('scanner','Список страниц очищен.')};
+$('scanner-edit').onclick=async()=>{
+ try{
+  if(!scannedPages.length)throw new Error('Сначала отсканируйте страницы.');
+  const button=$('scanner-edit');button.disabled=true;status('scanner','Подготавливаем PDF для редактора…');
+  if(!window.PDFLib)throw new Error('Не удалось загрузить PDF-библиотеку. Проверьте подключение к интернету.');
+  const out=await PDFLib.PDFDocument.create();
+  for(const page of scannedPages){
+   let image;if(page.contentType==='image/jpeg')image=await out.embedJpg(page.bytes);else if(page.contentType==='image/png')image=await out.embedPng(page.bytes);else throw new Error('Неподдерживаемый формат страницы: '+page.contentType);
+   const pdfPage=out.addPage([image.width,image.height]);pdfPage.drawImage(image,{x:0,y:0,width:image.width,height:image.height});
+  }
+  const bytes=await out.save(),file=new File([bytes],'DocuDesk-scan.pdf',{type:'application/pdf'});
+  const frame=document.getElementById('docudesk-editor-frame');
+  if(!frame||!frame.contentWindow||typeof frame.contentWindow.DocuDeskEditorOpenFile!=='function')throw new Error('Редактор ещё загружается. Перейдите во вкладку «Редактор изображений и PDF» и повторите попытку.');
+  navigate('editor');
+  await frame.contentWindow.DocuDeskEditorOpenFile(file);
+ }catch(e){console.error(e);status('scanner','Не удалось открыть PDF в редакторе: '+(e.message||'ошибка'),'err')}
+ finally{$('scanner-edit').disabled=!scannedPages.length}
+};
 $('scanner-pdf').onclick=()=>run('scanner',async()=>{
  if(!window.PDFLib)throw new Error('Не удалось загрузить PDF-библиотеку. Проверьте подключение к интернету.');
  const out=await PDFLib.PDFDocument.create();
