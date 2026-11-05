@@ -24,6 +24,8 @@ from urllib.parse import unquote, urljoin, urlsplit, quote
 HOST = "127.0.0.1"
 PORT = 8765
 ALLOWED_ORIGIN = "https://lomakobodiakov.github.io"
+PREVIEW_ORIGIN = "https://raw.githack.com"
+ALLOWED_ORIGINS = {ALLOWED_ORIGIN, PREVIEW_ORIGIN}
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SCAN_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_SCAN_PAGES = 20
@@ -312,8 +314,8 @@ class Handler(BaseHTTPRequestHandler):
     def _headers(self, status: int, content_type: str = "application/json; charset=utf-8") -> None:
         self.send_response(status)
         origin = self.headers.get("Origin", "")
-        if origin == ALLOWED_ORIGIN:
-            self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
+        if origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename, X-Convert-To")
@@ -334,13 +336,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _origin_allowed(self) -> bool:
         origin = self.headers.get("Origin", "")
-        if not origin or origin == ALLOWED_ORIGIN:
+        if not origin or origin in ALLOWED_ORIGINS:
             return True
         host = self.headers.get("Host", "")
         return origin == "http://" + host and urlsplit(self.path).path.startswith("/mobile/")
 
     def do_OPTIONS(self) -> None:
-        if self.headers.get("Origin", "") != ALLOWED_ORIGIN:
+        if self.headers.get("Origin", "") not in ALLOWED_ORIGINS:
             self._json(403, {"ok": False, "error": "Origin not allowed"})
             return
         self._headers(204)
