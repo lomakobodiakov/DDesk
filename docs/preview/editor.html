@@ -126,6 +126,15 @@ $('save').addEventListener('click',async()=>{try{
   }download(new Blob([await out.save()],{type:'application/pdf'}),safeName(file.name)+'-edited.pdf');say('PDF сохранён: '+source.numPages+' стр. '+(a4Mode?'на листах A4. ':'')+'Страницы после обработки являются изображениями.','ok')
  }
 }catch(e){console.error('DocuDesk save:',e);say(e.message||'Ошибка сохранения.','err')}finally{$('save').disabled=!work}});
+window.DocuDeskEditorOpenFile=async function(incomingFile){
+ try{
+  if(!(incomingFile instanceof File))throw new Error('Не передан PDF-файл.');
+  $('file').value='';
+  await load(incomingFile);
+  say('PDF из сканера открыт. Теперь можно редактировать страницы и сохранить результат.','ok');
+  return true;
+ }catch(error){say(error.message||'Не удалось открыть PDF.','err');throw error}
+};
 })();
 </script>
 </body>
