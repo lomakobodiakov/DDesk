@@ -511,19 +511,40 @@ let phoneCameraStream=null,phoneCameraBlob=null,phoneCameraCvPromise=null,phoneC
 function loadPhoneCameraCV(){
  if(window.cv&&window.cv.Mat)return Promise.resolve(window.cv);
  if(phoneCameraCvPromise)return phoneCameraCvPromise;
- phoneCameraCvPromise=new Promise((resolve,reject)=>{
-  let settled=false;
-  const finish=(err)=>{if(settled)return;settled=true;clearTimeout(timer);err?reject(err):resolve(window.cv)};
-  const timer=setTimeout(()=>finish(new Error('OpenCV не инициализировался. Обновите страницу и попробуйте снова.')),45000);
-  const script=document.createElement('script');script.src='https://docs.opencv.org/4.10.0/opencv.js';script.async=true;
-  script.onload=()=>{
-   if(window.cv&&window.cv.Mat){finish();return}
-   if(window.cv)window.cv.onRuntimeInitialized=()=>finish();
-   else finish(new Error('Библиотека OpenCV не загрузилась.'));
-  };
-  script.onerror=()=>finish(new Error('Не удалось загрузить OpenCV. Проверьте интернет-соединение.'));
-  document.head.appendChild(script);
- });
+ phoneCameraCvPromise=(async()=>{
+  const sources=[
+   'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+   'https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+   'https://docs.opencv.org/4.x/opencv.js'
+  ];
+  let lastError=null;
+  for(const src of sources){
+   try{
+    await new Promise((resolve,reject)=>{
+     const script=document.createElement('script');script.src=src;script.async=true;script.crossOrigin='anonymous';
+     let done=false,poll=null;
+     const finish=(err)=>{
+      if(done)return;done=true;clearTimeout(timer);if(poll)clearInterval(poll);
+      if(err){script.remove();reject(err)}else resolve();
+     };
+     const check=()=>{if(window.cv&&window.cv.Mat)finish();};
+     const timer=setTimeout(()=>finish(new Error('OpenCV не инициализировался с источника '+new URL(src).hostname)),35000);
+     script.onload=()=>{
+      if(window.cv){
+       if(window.cv.Mat){finish();return}
+       window.cv.onRuntimeInitialized=check;
+      }
+      poll=setInterval(check,150);
+      check();
+     };
+     script.onerror=()=>finish(new Error('Не удалось загрузить '+new URL(src).hostname));
+     document.head.appendChild(script);
+    });
+    if(window.cv&&window.cv.Mat)return window.cv;
+   }catch(e){lastError=e;console.warn('OpenCV source failed:',src,e)}
+  }
+  throw new Error('Не удалось загрузить модуль обработки документа с доступных источников. Проверьте интернет или отключите блокировщик контента. Последняя ошибка: '+(lastError?.message||'неизвестная ошибка'));
+ })().catch(e=>{phoneCameraCvPromise=null;throw e});
  return phoneCameraCvPromise;
 }
 function stopPhoneCamera(){
