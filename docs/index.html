@@ -584,7 +584,9 @@ $('scanner-edit').onclick=async()=>{
   const bytes=await out.save(),file=new File([bytes],'DocuDesk-scan.pdf',{type:'application/pdf'});
   const frame=document.getElementById('docudesk-editor-frame');
   if(!frame||!frame.contentWindow||typeof frame.contentWindow.DocuDeskEditorOpenFile!=='function')throw new Error('Редактор ещё загружается. Перейдите во вкладку «Редактор изображений и PDF» и повторите попытку.');
-  navigate('editor');
+  const editorNav=document.querySelector('.nav-item[data-page="editor"]');
+  if(!editorNav)throw new Error('Не найдена вкладка редактора.');
+  editorNav.click();
   await frame.contentWindow.DocuDeskEditorOpenFile(file);
  }catch(e){console.error(e);status('scanner','Не удалось открыть PDF в редакторе: '+(e.message||'ошибка'),'err')}
  finally{$('scanner-edit').disabled=!scannedPages.length}
