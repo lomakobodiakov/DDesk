@@ -143,15 +143,7 @@ body{min-height:100vh}
  <div><label for="scan-color" class="muted">Цветовой режим</label><select id="scan-color" class="field" style="width:100%;margin-top:6px"><option value="RGB24">Цветной</option><option value="Grayscale8">Оттенки серого</option><option value="BlackAndWhite1">Чёрно-белый</option></select></div>
  <div><label for="scan-dpi" class="muted">Разрешение</label><select id="scan-dpi" class="field" style="width:100%;margin-top:6px"><option value="150">150 dpi — быстрее</option><option value="300" selected>300 dpi — рекомендуется</option><option value="600">600 dpi — подробнее</option></select></div>
 </div>
-<div class="controls"><button class="btn" id="phone-camera-open" type="button">📷 Сканировать камерой телефона</button><button class="btn secondary" id="scanner-check">Проверить подключение</button><button class="btn" id="scanner-start">Сканировать</button><button class="btn secondary" id="scanner-clear" disabled>Очистить страницы</button></div>
-<div id="phone-camera-panel" style="display:none;margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface)">
- <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><strong>Сканирование камерой</strong><button class="btn secondary" id="phone-camera-close" type="button">Закрыть</button></div>
- <p class="note">Положите документ на контрастную ровную поверхность. Держите телефон параллельно листу и убедитесь, что все четыре угла видны в кадре.</p>
- <video id="phone-camera-video" autoplay playsinline muted style="display:block;width:100%;max-height:60vh;object-fit:contain;background:#111;border-radius:10px"></video>
- <canvas id="phone-camera-preview" style="display:none;width:100%;max-height:60vh;object-fit:contain;background:#111;border-radius:10px"></canvas>
- <div class="controls"><button class="btn secondary" id="phone-camera-start" type="button">Включить камеру</button><button class="btn" id="phone-camera-capture" type="button" disabled>Сканировать сейчас вручную</button><button class="btn secondary" id="phone-camera-retake" type="button" style="display:none">Переснять</button><button class="btn" id="phone-camera-add" type="button" style="display:none">Добавить страницу в PDF</button></div>
- <div class="status" id="phone-camera-status" aria-live="polite">Камера работает непосредственно в браузере. После снимка DocuDesk попробует определить края листа и исправить перспективу.</div>
-</div>
+<div class="controls"><button class="btn secondary" id="scanner-check">Проверить подключение</button><button class="btn" id="scanner-start">Сканировать</button><button class="btn secondary" id="scanner-clear" disabled>Очистить страницы</button></div>
 <div class="status" id="scanner-status" aria-live="polite">Запусти start_local_bridge.bat и оставь окно открытым. Сначала проверь подключение, затем нажми «Сканировать».</div>
 <div id="scan-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:16px"></div>
 <div class="controls"><button class="btn" id="scanner-pdf" disabled>Сохранить все страницы в PDF</button></div>
@@ -507,169 +499,6 @@ $('ocr-go').onclick=()=>run('ocr',async()=>{
 });
 const scanBridge='http://127.0.0.1:8765';
 let scannedPages=[];
-let phoneCameraStream=null,phoneCameraBlob=null,phoneCameraCvPromise=null,phoneCameraLoop=0,phoneCameraLastCheck=0,phoneCameraStable=0,phoneCameraBusy=false;
-function loadPhoneCameraCV(){
- if(window.cv&&window.cv.Mat)return Promise.resolve(window.cv);
- if(phoneCameraCvPromise)return phoneCameraCvPromise;
- phoneCameraCvPromise=(async()=>{
-  const sources=[
-   'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
-   'https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
-   'https://docs.opencv.org/4.x/opencv.js'
-  ];
-  let lastError=null;
-  for(const src of sources){
-   try{
-    await new Promise((resolve,reject)=>{
-     const script=document.createElement('script');script.src=src;script.async=true;script.crossOrigin='anonymous';
-     let done=false,poll=null;
-     const finish=(err)=>{
-      if(done)return;done=true;clearTimeout(timer);if(poll)clearInterval(poll);
-      if(err){script.remove();reject(err)}else resolve();
-     };
-     const check=()=>{if(window.cv&&window.cv.Mat)finish();};
-     const timer=setTimeout(()=>finish(new Error('OpenCV не инициализировался с источника '+new URL(src).hostname)),35000);
-     script.onload=()=>{
-      if(window.cv){
-       if(window.cv.Mat){finish();return}
-       window.cv.onRuntimeInitialized=check;
-      }
-      poll=setInterval(check,150);
-      check();
-     };
-     script.onerror=()=>finish(new Error('Не удалось загрузить '+new URL(src).hostname));
-     document.head.appendChild(script);
-    });
-    if(window.cv&&window.cv.Mat)return window.cv;
-   }catch(e){lastError=e;console.warn('OpenCV source failed:',src,e)}
-  }
-  throw new Error('Не удалось загрузить модуль обработки документа с доступных источников. Проверьте интернет или отключите блокировщик контента. Последняя ошибка: '+(lastError?.message||'неизвестная ошибка'));
- })().catch(e=>{phoneCameraCvPromise=null;throw e});
- return phoneCameraCvPromise;
-}
-function stopPhoneCamera(){
- if(phoneCameraLoop)cancelAnimationFrame(phoneCameraLoop);phoneCameraLoop=0;phoneCameraBusy=false;phoneCameraStable=0;
- if(phoneCameraStream){phoneCameraStream.getTracks().forEach(t=>t.stop());phoneCameraStream=null}
- $('phone-camera-video').srcObject=null;$('phone-camera-capture').disabled=true;
-}
-$('phone-camera-open').onclick=()=>{$('phone-camera-panel').style.display='block';$('phone-camera-status').textContent='Нажмите «Включить камеру». После наведения на документ приложение автоматически найдёт края и сделает скан.'};
-$('phone-camera-close').onclick=()=>{stopPhoneCamera();$('phone-camera-panel').style.display='none'};
-$('phone-camera-start').onclick=async()=>{
- try{
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Камера недоступна. Откройте сайт по HTTPS в Safari или Chrome.');
-  stopPhoneCamera();
-  const video=$('phone-camera-video');
-  video.style.display='block';$('phone-camera-preview').style.display='none';
-  $('phone-camera-status').textContent='Запрашиваем доступ к камере…';
-  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}}});
-  phoneCameraStream=stream;video.muted=true;video.autoplay=true;video.playsInline=true;video.setAttribute('playsinline','');video.srcObject=stream;
-  await video.play();
-  $('phone-camera-capture').disabled=false;$('phone-camera-retake').style.display='none';$('phone-camera-add').style.display='none';$('phone-camera-add').disabled=false;
-  $('phone-camera-status').textContent='Камера включена. Наведите её на документ и нажмите «Сканировать сейчас вручную».';
-  $('phone-camera-status').className='status ok';
- }catch(e){
-  console.error('Phone camera start failed:',e);stopPhoneCamera();
-  $('phone-camera-status').textContent='Не удалось включить камеру: '+(e.message||e);$('phone-camera-status').className='status err';
- }
-};
-function orderDocumentCorners(points){
- const sum=p=>p.x+p.y,diff=p=>p.x-p.y;
- return [points.reduce((a,b)=>sum(a)<sum(b)?a:b),points.reduce((a,b)=>diff(a)>diff(b)?a:b),points.reduce((a,b)=>sum(a)>sum(b)?a:b),points.reduce((a,b)=>diff(a)<diff(b)?a:b)];
-}
-async function cropPhoneDocument(sourceCanvas){
- const cv=await loadPhoneCameraCV(),src=cv.imread(sourceCanvas),gray=new cv.Mat(),blur=new cv.Mat(),edges=new cv.Mat(),contours=new cv.MatVector(),hierarchy=new cv.Mat();
- let best=null,kernel=null;
- try{
-  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);cv.Canny(blur,edges,45,150);
-  kernel=cv.Mat.ones(3,3,cv.CV_8U);cv.dilate(edges,edges,kernel);
-  cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
-  let bestArea=0;
-  for(let i=0;i<contours.size();i++){
-   const contour=contours.get(i),perimeter=cv.arcLength(contour,true),approx=new cv.Mat();
-   cv.approxPolyDP(contour,approx,.025*perimeter,true);
-   if(approx.rows===4&&cv.isContourConvex(approx)){
-    const area=Math.abs(cv.contourArea(approx));
-    if(area>bestArea&&area>sourceCanvas.width*sourceCanvas.height*.10){bestArea=area;if(best)best.delete();best=approx;approx=null}
-   }
-   if(approx)approx.delete();contour.delete();
-  }
-  if(!best)return {canvas:sourceCanvas,detected:false};
-  const raw=[];for(let i=0;i<4;i++)raw.push({x:best.intPtr(i,0)[0],y:best.intPtr(i,0)[1]});
-  const p=orderDocumentCorners(raw),dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-  const width=Math.round(Math.max(dist(p[0],p[1]),dist(p[3],p[2]))),height=Math.round(Math.max(dist(p[0],p[3]),dist(p[1],p[2])));
-  if(width<100||height<100)return {canvas:sourceCanvas,detected:false};
-  const from=cv.matFromArray(4,1,cv.CV_32FC2,p.flatMap(v=>[v.x,v.y])),to=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,width-1,0,width-1,height-1,0,height-1]);
-  const matrix=cv.getPerspectiveTransform(from,to),warped=new cv.Mat();
-  cv.warpPerspective(src,warped,matrix,new cv.Size(width,height),cv.INTER_CUBIC,cv.BORDER_REPLICATE);
-  const result=document.createElement('canvas');cv.imshow(result,warped);
-  from.delete();to.delete();matrix.delete();warped.delete();
-  return {canvas:result,detected:true};
- }finally{if(best)best.delete();if(kernel)kernel.delete();src.delete();gray.delete();blur.delete();edges.delete();contours.delete();hierarchy.delete()}
-}
-async async function phoneCameraDetectLoop(timestamp){
- if(!phoneCameraStream)return;
- phoneCameraLoop=requestAnimationFrame(phoneCameraDetectLoop);
- if(timestamp-phoneCameraLastCheck<450||phoneCameraBusy)return;
- const video=$('phone-camera-video');if(!video.videoWidth||video.readyState<2)return;
- phoneCameraLastCheck=timestamp;phoneCameraBusy=true;
- try{
-  const scale=Math.min(1,720/video.videoWidth),probe=document.createElement('canvas');
-  probe.width=Math.round(video.videoWidth*scale);probe.height=Math.round(video.videoHeight*scale);
-  probe.getContext('2d').drawImage(video,0,0,probe.width,probe.height);
-  const result=await cropPhoneDocument(probe);
-  if(result.detected){
-   phoneCameraStable++;
-   $('phone-camera-status').textContent='Документ найден… '+phoneCameraStable+'/3. Не двигайте телефон.';
-   if(phoneCameraStable>=3){phoneCameraBusy=false;await capturePhoneDocument(true);return}
-  }else{
-   phoneCameraStable=0;$('phone-camera-status').textContent='Ищем лист. Поместите весь документ в кадр на контрастном фоне.';
-  }
- }catch(e){console.warn('Live document detection:',e);phoneCameraStable=0;$('phone-camera-status').textContent='Автопоиск границ: '+(e.message||e)}
- finally{phoneCameraBusy=false}
-}
-async function capturePhoneDocument(automatic=false){
- const video=$('phone-camera-video');
- if(!video.videoWidth||!video.videoHeight){
-  $('phone-camera-status').textContent='Камера ещё не передала изображение. Подождите секунду и нажмите ещё раз.';
-  $('phone-camera-capture').disabled=false;return;
- }
- $('phone-camera-capture').disabled=true;
- $('phone-camera-status').textContent=automatic?'Документ зафиксирован. Обрабатываем…':'Сохраняем снимок с камеры…';
- try{
-  const raw=document.createElement('canvas');raw.width=video.videoWidth;raw.height=video.videoHeight;
-  raw.getContext('2d').drawImage(video,0,0,raw.width,raw.height);
-  let result={canvas:raw,detected:false};
-  if(window.cv&&window.cv.Mat){
-   try{result=await cropPhoneDocument(raw)}catch(cvError){console.warn('Автообрезка не сработала, сохраняем исходный кадр:',cvError)}
-  }
-  if(automatic&&!result.detected)throw new Error('Не удалось определить границы документа.');
-  if(!automatic&&!result.detected)result={canvas:raw,detected:false};
-  const preview=$('phone-camera-preview');
-  preview.width=result.canvas.width;preview.height=result.canvas.height;
-  preview.getContext('2d').drawImage(result.canvas,0,0);
-  phoneCameraBlob=await new Promise((resolve,reject)=>result.canvas.toBlob(b=>b?resolve(b):reject(new Error('Браузер не смог создать JPEG.')),'image/jpeg',.94));
-  if(!phoneCameraBlob)throw new Error('Получено пустое изображение.');
-  video.style.display='none';preview.style.display='block';stopPhoneCamera();
-  $('phone-camera-retake').style.display='inline-flex';$('phone-camera-add').style.display='inline-flex';$('phone-camera-add').disabled=false;
-  $('phone-camera-status').textContent=result.detected?'Документ обрезан и выровнен. Проверьте снимок и добавьте страницу.':'Снимок сохранён целиком (автообрезка пока недоступна). Проверьте его и добавьте страницу.';
-  $('phone-camera-status').className='status ok';
- }catch(e){
-  console.error('Phone capture failed:',e);
-  $('phone-camera-status').textContent='Не удалось сделать снимок: '+(e.message||e);
-  $('phone-camera-status').className='status err';
-  $('phone-camera-capture').disabled=false;
- }
-}
-$('phone-camera-capture').onclick=()=>capturePhoneDocument(false);
-$('phone-camera-retake').onclick=()=>{$('phone-camera-preview').style.display='none';$('phone-camera-video').style.display='block';$('phone-camera-retake').style.display='none';$('phone-camera-add').style.display='none';phoneCameraBlob=null;$('phone-camera-start').click()};
-$('phone-camera-add').onclick=()=>{
- if(!phoneCameraBlob)return;
- const blob=phoneCameraBlob,url=URL.createObjectURL(blob);
- scannedPages.push({name:'phone-scan-'+(scannedPages.length+1)+'.jpg',contentType:'image/jpeg',bytes:new Uint8Array(0),size:blob.size,url,blob});
- renderScannedPages();$('scanner-status').textContent='Страница с телефона добавлена. Всего страниц: '+scannedPages.length+'. Можно снять следующую или сохранить PDF.';$('scanner-status').className='status ok';
- $('phone-camera-status').textContent='Страница добавлена в общий документ.';$('phone-camera-add').disabled=true;
-};
-
 function renderScannedPages(){
  const wrap=$('scan-results');wrap.innerHTML='';
  scannedPages.forEach((page,index)=>{
@@ -735,7 +564,7 @@ $('scanner-pdf').onclick=()=>run('scanner',async()=>{
  const out=await PDFLib.PDFDocument.create();
  for(let i=0;i<scannedPages.length;i++){
   const page=scannedPages[i];let image;
-  if(page.contentType==='image/jpeg')image=await out.embedJpg(page.blob?new Uint8Array(await page.blob.arrayBuffer()):page.bytes);
+  if(page.contentType==='image/jpeg')image=await out.embedJpg(page.bytes);
   else if(page.contentType==='image/png')image=await out.embedPng(page.bytes);
   else throw new Error('Неподдерживаемый формат страницы: '+page.contentType);
   const pdfPage=out.addPage([image.width,image.height]);pdfPage.drawImage(image,{x:0,y:0,width:image.width,height:image.height});
