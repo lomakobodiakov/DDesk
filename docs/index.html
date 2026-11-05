@@ -632,19 +632,37 @@ async function phoneCameraDetectLoop(timestamp){
  finally{phoneCameraBusy=false}
 }
 async function capturePhoneDocument(automatic=false){
- const video=$('phone-camera-video');if(!video.videoWidth)return;
- $('phone-camera-capture').disabled=true;$('phone-camera-status').textContent=automatic?'Документ зафиксирован. Обрезаем фон и выравниваем лист…':'Обрабатываем снимок и ищем края документа…';
+ const video=$('phone-camera-video');
+ if(!video.videoWidth||!video.videoHeight){
+  $('phone-camera-status').textContent='Камера ещё не передала изображение. Подождите секунду и нажмите ещё раз.';
+  $('phone-camera-capture').disabled=false;return;
+ }
+ $('phone-camera-capture').disabled=true;
+ $('phone-camera-status').textContent=automatic?'Документ зафиксирован. Обрабатываем…':'Сохраняем снимок с камеры…';
  try{
-  const raw=document.createElement('canvas');raw.width=video.videoWidth;raw.height=video.videoHeight;raw.getContext('2d').drawImage(video,0,0);
-  const result=await cropPhoneDocument(raw),preview=$('phone-camera-preview');
-  if(!result.detected&&!automatic){$('phone-camera-status').textContent='Не удалось найти границы. Наведите камеру ровно на лист и попробуйте ещё раз.';$('phone-camera-capture').disabled=false;return}
-  if(!result.detected)throw new Error('Не удалось надёжно определить границы документа. Попробуйте другое освещение и контрастный фон.');
-  preview.width=result.canvas.width;preview.height=result.canvas.height;preview.getContext('2d').drawImage(result.canvas,0,0);
-  phoneCameraBlob=await new Promise((resolve,reject)=>result.canvas.toBlob(b=>b?resolve(b):reject(new Error('Не удалось подготовить изображение.')),'image/jpeg',.95));
+  const raw=document.createElement('canvas');raw.width=video.videoWidth;raw.height=video.videoHeight;
+  raw.getContext('2d').drawImage(video,0,0,raw.width,raw.height);
+  let result={canvas:raw,detected:false};
+  if(window.cv&&window.cv.Mat){
+   try{result=await cropPhoneDocument(raw)}catch(cvError){console.warn('Автообрезка не сработала, сохраняем исходный кадр:',cvError)}
+  }
+  if(automatic&&!result.detected)throw new Error('Не удалось определить границы документа.');
+  if(!automatic&&!result.detected)result={canvas:raw,detected:false};
+  const preview=$('phone-camera-preview');
+  preview.width=result.canvas.width;preview.height=result.canvas.height;
+  preview.getContext('2d').drawImage(result.canvas,0,0);
+  phoneCameraBlob=await new Promise((resolve,reject)=>result.canvas.toBlob(b=>b?resolve(b):reject(new Error('Браузер не смог создать JPEG.')),'image/jpeg',.94));
+  if(!phoneCameraBlob)throw new Error('Получено пустое изображение.');
   video.style.display='none';preview.style.display='block';stopPhoneCamera();
   $('phone-camera-retake').style.display='inline-flex';$('phone-camera-add').style.display='inline-flex';$('phone-camera-add').disabled=false;
-  $('phone-camera-status').textContent='Документ автоматически отсканирован: фон обрезан, перспектива исправлена. Проверьте результат и добавьте страницу.';$('phone-camera-status').className='status ok';
- }catch(e){console.error(e);$('phone-camera-status').textContent='Не удалось отсканировать документ: '+(e.message||e);$('phone-camera-status').className='status err';if(!automatic)$('phone-camera-capture').disabled=false;else stopPhoneCamera()}
+  $('phone-camera-status').textContent=result.detected?'Документ обрезан и выровнен. Проверьте снимок и добавьте страницу.':'Снимок сохранён целиком (автообрезка пока недоступна). Проверьте его и добавьте страницу.';
+  $('phone-camera-status').className='status ok';
+ }catch(e){
+  console.error('Phone capture failed:',e);
+  $('phone-camera-status').textContent='Не удалось сделать снимок: '+(e.message||e);
+  $('phone-camera-status').className='status err';
+  $('phone-camera-capture').disabled=false;
+ }
 }
 $('phone-camera-capture').onclick=()=>capturePhoneDocument(false);
 $('phone-camera-retake').onclick=()=>{$('phone-camera-preview').style.display='none';$('phone-camera-video').style.display='block';$('phone-camera-retake').style.display='none';$('phone-camera-add').style.display='none';phoneCameraBlob=null;$('phone-camera-start').click()};
