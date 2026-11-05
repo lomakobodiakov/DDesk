@@ -224,7 +224,10 @@ def scan_wia_one_page(device_id: str, color_mode: str, resolution: int) -> list[
     pythoncom.CoInitialize()
     try:
         raw_id = device_id.removeprefix("wia:")
-        manager = win32com.client.Dispatch("WIA.DeviceManager")
+        try:
+            manager = win32com.client.Dispatch("WIA.DeviceManager")
+        except Exception:
+            manager = win32com.client.gencache.EnsureDispatch("WIA.DeviceManager")
         selected = None
         for info in manager.DeviceInfos:
             if str(info.DeviceID) == raw_id:
@@ -449,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("DocuDesk Local Bridge 0.3 — generic WIA + eSCL")
+    print("DocuDesk Local Bridge 0.4 — Windows WIA + eSCL/AirScan")
     print("Discovery: Windows WIA and network eSCL/AirScan (Bonjour/mDNS)")
     print(f"Local endpoint: http://{HOST}:{PORT}")
     print("Keep this window open while using the scanner. Close it to stop the bridge.")
