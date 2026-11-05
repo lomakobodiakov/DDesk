@@ -8,6 +8,7 @@ The service binds to loopback only and is not a general-purpose HTTP proxy.
 
 import base64
 import http.client
+import ipaddress
 import json
 import os
 import shutil
@@ -319,6 +320,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         query = urlsplit(self.path).query
+        try:
+            remote_is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            remote_is_loopback = False
+        if not remote_is_loopback and path != "/mobile":
+            self._json(403, {"ok": False, "error": "LAN access is limited to the paired phone upload page."})
+            return
         if path == "/mobile":
             from urllib.parse import parse_qs
             token = parse_qs(query).get("token", [""])[0]
@@ -435,6 +443,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         query = urlsplit(self.path).query
+        try:
+            remote_is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            remote_is_loopback = False
+        if not remote_is_loopback and path != "/mobile/upload":
+            self._json(403, {"ok": False, "error": "LAN access is limited to paired phone image uploads."})
+            return
         if path == "/mobile/start":
             token = secrets.token_urlsafe(24)
             with MOBILE_SESSION_LOCK:
