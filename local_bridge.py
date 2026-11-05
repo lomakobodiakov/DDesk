@@ -10,29 +10,26 @@ import base64
 import http.client
 import json
 import os
+import socket
 import shutil
 import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit, quote
 
 HOST = "127.0.0.1"
 PORT = 8765
-PRINTER_HOST = "192.168.5.180"
-PRINTER_PORT = 80
-PRINTER_BASE = f"http://{PRINTER_HOST}:{PRINTER_PORT}"
 ALLOWED_ORIGIN = "https://lomakobodiakov.github.io"
-CAPABILITIES_PATH = "/eSCL/ScannerCapabilities"
-SCAN_JOBS_PATH = "/eSCL/ScanJobs"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SCAN_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_SCAN_PAGES = 20
 MAX_CONVERT_BYTES = 80 * 1024 * 1024
 ALLOWED_SOURCES = {"Platen", "Feeder"}
 ALLOWED_COLOR_MODES = {"RGB24", "Grayscale8", "BlackAndWhite1"}
-ALLOWED_RESOLUTIONS = {150, 300, 600}
+ALLOWED_RESOLUTIONS = {75, 100, 150, 200, 300, 600, 1200}
+ESCL_DEVICES: dict[str, dict] = {}
 PAPER_SIZES = {
     "A4": (2480, 3508),
     "Letter": (2550, 3300),
@@ -44,30 +41,124 @@ class ScannerError(Exception):
     pass
 
 
-def printer_request(method: str, path: str, body: bytes | None = None,
-                    headers: dict[str, str] | None = None, timeout: int = 90):
-    conn = http.client.HTTPConnection(PRINTER_HOST, PRINTER_PORT, timeout=timeout)
+def escl_request(base_url: str, method: str, path: str, body: bytes | None = None,
+                 headers: dict[str, str] | None = None, timeout: int = 90):
+    parsed = urlsplit(urljoin(base_url.rstrip("/") + "/", path.lstrip("/")))
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ScannerError("Некорректный адрес сетевого сканера.")
+    cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = cls(parsed.hostname, parsed.port, timeout=timeout)
     try:
-        conn.request(method, path, body=body, headers=headers or {})
+        target = parsed.path + (("?" + parsed.query) if parsed.query else "")
+        conn.request(method, target, body=body, headers=headers or {})
         response = conn.getresponse()
-        data = response.read(MAX_SCAN_IMAGE_BYTES + 1 if method == "GET" and path.endswith("/NextDocument") else MAX_RESPONSE_BYTES + 1)
-        if len(data) > (MAX_SCAN_IMAGE_BYTES if method == "GET" and path.endswith("/NextDocument") else MAX_RESPONSE_BYTES):
+        limit = MAX_SCAN_IMAGE_BYTES if method == "GET" and path.endswith("/NextDocument") else MAX_RESPONSE_BYTES
+        data = response.read(limit + 1)
+        if len(data) > limit:
             raise ScannerError("Ответ сканера превышает допустимый размер.")
         return response.status, dict(response.getheaders()), data
     finally:
         conn.close()
 
 
-def safe_job_url(location: str) -> str:
-    if not location:
-        raise ScannerError("МФУ создало задание без заголовка Location.")
-    candidate = urljoin(PRINTER_BASE + "/", location)
-    parsed = urlsplit(candidate)
-    if parsed.scheme != "http" or parsed.hostname != PRINTER_HOST or parsed.port not in (None, PRINTER_PORT):
-        raise ScannerError("МФУ вернуло неожиданный адрес задания сканирования.")
-    if not parsed.path.startswith("/eSCL/ScanJobs/"):
-        raise ScannerError("МФУ вернуло неожиданный путь задания сканирования.")
-    return candidate.rstrip("/")
+def discover_escl_scanners() -> list[dict]:
+    found = []
+    try:
+        from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
+    except ImportError:
+        return found
+    class Listener(ServiceListener):
+        def __init__(self): self.items = []
+        def add_service(self, zc, service_type, name):
+            info = zc.get_service_info(service_type, name, timeout=1500)
+            if not info: return
+            props = {k.decode("utf-8", "ignore").lower(): v.decode("utf-8", "ignore")
+                     for k, v in (info.properties or {}).items()}
+            addresses = info.parsed_addresses()
+            if not addresses: return
+            addr = next((v for v in addresses if ":" not in v), addresses[0])
+            resource = props.get("rs", "/eSCL/").strip()
+            if not resource.startswith("/"): resource = "/" + resource
+            scheme = "https" if props.get("tls", "").lower() in ("1", "true", "yes") else "http"
+            base = f"{scheme}://{addr}:{info.port}{resource.rstrip('/')}/"
+            label = props.get("ty") or name.split(".")[0].replace("-", " ")
+            self.items.append((name, base, label))
+        def update_service(self, zc, service_type, name): self.add_service(zc, service_type, name)
+        def remove_service(self, zc, service_type, name): pass
+    zc = Zeroconf()
+    listener = Listener()
+    try:
+        ServiceBrowser(zc, ["_uscan._tcp.local.", "_uscans._tcp.local."], listener)
+        time.sleep(2)
+    finally:
+        zc.close()
+    for name, base, label in listener.items:
+        device_id = "escl:" + quote(name, safe="")
+        ESCL_DEVICES[device_id] = {"base": base, "name": label}
+        found.append({"id": device_id, "name": label, "connection": "eSCL/AirScan", "address": base})
+    return found
+
+
+def escl_capabilities(device: dict):
+    status, _, data = escl_request(device["base"], "GET", "ScannerCapabilities",
+        headers={"Accept": "application/xml, text/xml"}, timeout=8)
+    if status != 200 or b"ScannerCapabilities" not in data:
+        raise ScannerError(f"Сканер не вернул возможности (HTTP {status}).")
+    root = ET.fromstring(data)
+    sources = sorted({el.text.strip() for el in root.iter()
+        if el.tag.split("}")[-1] == "InputSource" and el.text and el.text.strip()})
+    return data, sources
+
+
+def escl_job_path(base: str, location: str) -> str:
+    if not location: raise ScannerError("Сканер не вернул адрес задания.")
+    url = urljoin(base, location)
+    parsed, origin = urlsplit(url), urlsplit(base)
+    if parsed.scheme != origin.scheme or parsed.hostname != origin.hostname or parsed.port != origin.port:
+        raise ScannerError("Сканер вернул неожиданный адрес задания.")
+    if "/ScanJobs/" not in parsed.path: raise ScannerError("Неожиданный путь задания сканирования.")
+    return parsed.path.rstrip("/")
+
+
+def scan_escl(device: dict, source: str, color_mode: str, resolution: int, paper_size: str) -> list[dict]:
+    if source not in ALLOWED_SOURCES or color_mode not in ALLOWED_COLOR_MODES or resolution not in ALLOWED_RESOLUTIONS:
+        raise ScannerError("Выбраны неподдерживаемые параметры сканирования.")
+    if paper_size not in PAPER_SIZES: raise ScannerError("Неподдерживаемый формат бумаги.")
+    capabilities, sources = escl_capabilities(device)
+    if sources and source not in sources:
+        raise ScannerError("Выбранный источник не поддерживается этим сканером.")
+    width, height = PAPER_SIZES[paper_size]
+    settings = f'''<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm" xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
+<pwg:Version>2.0</pwg:Version><pwg:ScanRegions><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
+<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset><pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height></pwg:ScanRegion></pwg:ScanRegions>
+<pwg:InputSource>{source}</pwg:InputSource><scan:ColorMode>{color_mode}</scan:ColorMode><pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
+<scan:XResolution>{resolution}</scan:XResolution><scan:YResolution>{resolution}</scan:YResolution></scan:ScanSettings>'''.encode("utf-8")
+    status, headers, data = escl_request(device["base"], "POST", "ScanJobs", settings,
+        {"Content-Type": "text/xml; charset=utf-8", "Accept": "application/xml, text/xml"}, timeout=20)
+    if status not in (200, 201): raise ScannerError(f"Сканер отклонил задание (HTTP {status}). " + data.decode("utf-8", "replace")[:400])
+    job = escl_job_path(device["base"], next((v for k,v in headers.items() if k.lower()=="location"), ""))
+    pages = []
+    try:
+        for i in range(MAX_SCAN_PAGES):
+            for _ in range(90):
+                st, hdr, raw = escl_request(device["base"], "GET", job + "/NextDocument",
+                    headers={"Accept":"image/jpeg, image/png"}, timeout=90)
+                if st != 503: break
+                time.sleep(1)
+            if st in (404, 410):
+                if not pages: raise ScannerError("Сканер не вернул изображение.")
+                break
+            if st != 200: raise ScannerError(f"Ошибка получения страницы {i+1}: HTTP {st}")
+            mime = next((v.split(";")[0].lower() for k,v in hdr.items() if k.lower()=="content-type"),"image/jpeg")
+            if mime not in ("image/jpeg","image/png"): raise ScannerError("Формат страницы не поддерживается.")
+            ext = "jpg" if mime=="image/jpeg" else "png"
+            pages.append({"name":f"scan_{i+1:03d}.{ext}","content_type":mime,"size":len(raw),
+                          "data":base64.b64encode(raw).decode("ascii")})
+    finally:
+        try: escl_request(device["base"], "DELETE", job, timeout=5)
+        except Exception: pass
+    return pages
 
 
 def make_scan_settings(source: str, color_mode: str, resolution: int, paper_size: str) -> bytes:
