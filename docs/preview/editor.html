@@ -128,9 +128,15 @@ $('save').addEventListener('click',async()=>{try{
 }catch(e){console.error('DocuDesk save:',e);say(e.message||'Ошибка сохранения.','err')}finally{$('save').disabled=!work}});
 window.DocuDeskEditorOpenFile=async function(incomingFile){
  try{
-  if(!(incomingFile instanceof File))throw new Error('Не передан PDF-файл.');
+  // File objects passed from the parent page belong to a different JS realm,
+  // so instanceof File is not a reliable cross-iframe check.
+  if(!incomingFile || typeof incomingFile.arrayBuffer!=='function')throw new Error('Не передан PDF-файл.');
+  const fileName=incomingFile.name||'DocuDesk-scan.pdf';
+  const fileType=incomingFile.type||'application/pdf';
+  if(fileType!=='application/pdf' && !/\.pdf$/i.test(fileName))throw new Error('Передан файл не в формате PDF.');
+  const localFile=new File([await incomingFile.arrayBuffer()],fileName,{type:'application/pdf'});
   $('file').value='';
-  await load(incomingFile);
+  await load(localFile);
   say('PDF из сканера открыт. Теперь можно редактировать страницы и сохранить результат.','ok');
   return true;
  }catch(error){say(error.message||'Не удалось открыть PDF.','err');throw error}
