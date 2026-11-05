@@ -423,7 +423,9 @@ class Handler(BaseHTTPRequestHandler):
             if length < 1 or length > 16 * 1024:
                 raise ScannerError("Некорректный размер запроса.")
             request_data = json.loads(self.rfile.read(length).decode("utf-8"))
-            device_id = str(request_data.get("deviceId", "escl:canon-mf440"))
+            device_id = str(request_data.get("deviceId", ""))
+            if not device_id:
+                raise ScannerError("Сначала выберите сканер и обновите список устройств.")
             source = request_data.get("source", "Platen")
             color_mode = request_data.get("colorMode", "RGB24")
             resolution = int(request_data.get("resolution", 300))
