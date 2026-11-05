@@ -524,6 +524,7 @@ async function refreshScannerDevices(){
    select.append(option);
   });
   if([...select.options].some(option=>option.value===previous))select.value=previous;
+  updateScannerSourceOptions();
   if(select.options.length){
    const warnings=[result.scannerWarning,result.networkWarning].filter(Boolean).join(' ');
    status('scanner','Найдено устройств: '+select.options.length+'. '+warnings+' Выбери устройство и нажми «Сканировать».','ok');
@@ -534,6 +535,13 @@ async function refreshScannerDevices(){
   console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
  }
 }
+function updateScannerSourceOptions(){
+ const isWia=$('scan-device').value.startsWith('wia:');
+ const feeder=[...$('scan-source').options].find(option=>option.value==='Feeder');
+ if(feeder)feeder.disabled=isWia;
+ if(isWia&&$('scan-source').value==='Feeder')$('scan-source').value='Platen';
+}
+$('scan-device').onchange=updateScannerSourceOptions;
 $('scanner-refresh').onclick=refreshScannerDevices;
 $('scanner-check').onclick=async()=>{
  await refreshScannerDevices();
