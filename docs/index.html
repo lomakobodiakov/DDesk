@@ -136,7 +136,7 @@ body{min-height:100vh}
 <section class="tool" id="scanner">
 <div class="icon">▤</div><h2>Сканирование документов</h2>
 <p>Выберите сканер или МФУ, подключённое к этому компьютеру по USB или доступное в локальной сети. Для обнаружения USB-устройств нужен локальный помощник Windows.</p>
-<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin:14px 0"><div><label for="scan-device" class="muted">Устройство сканирования</label><select id="scan-device" class="field" style="width:100%;margin-top:6px"><option value="escl:canon-mf440">Canon MF440 Series (сеть eSCL)</option></select></div><button class="btn secondary" id="scanner-refresh" type="button">Обновить устройства</button></div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin:14px 0"><div><label for="scan-device" class="muted">Устройство сканирования</label><select id="scan-device" class="field" style="width:100%;margin-top:6px"><option value="">Нажмите «Обновить устройства»</option></select></div><button class="btn secondary" id="scanner-refresh" type="button">Обновить устройства</button></div>
 <div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
  <div><label for="scan-source" class="muted">Источник</label><select id="scan-source" class="field" style="width:100%;margin-top:6px"><option value="Platen">Стекло (одна страница)</option><option value="Feeder">Автоподатчик (несколько страниц)</option></select></div>
  <div><label for="scan-paper" class="muted">Размер бумаги</label><select id="scan-paper" class="field" style="width:100%;margin-top:6px"><option value="A4">A4</option><option value="Letter">Letter</option><option value="Legal">Legal</option></select></div>
@@ -148,7 +148,7 @@ body{min-height:100vh}
 <div id="scan-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:16px"></div>
 <div class="controls"><button class="btn" id="scanner-pdf" disabled>Сохранить все страницы в PDF</button></div>
 </section>
-\n<div class="note"><strong>Ограничения браузерной версии:</strong> OCR распознаёт текст из PDF и изображений локально в браузере. Прямое сканирование обычных USB-устройств через WIA/TWAIN без установки помощника невозможно; сетевые сканеры поддерживаются только при совместимости с eSCL/AirScan и разрешении соединения браузером. Word/Excel пока не конвертируются. Для больших документов может потребоваться больше оперативной памяти.</div>
+\n<div class="note"><strong>Ограничения браузерной версии:</strong> OCR распознаёт текст из PDF и изображений локально в браузере. USB-сканеры обнаруживаются через Windows WIA при наличии драйвера; сетевые — через eSCL/AirScan (Bonjour/mDNS). Поддержка зависит от драйвера и возможностей устройства. Word/Excel пока не конвертируются. Для больших документов может потребоваться больше оперативной памяти.</div>
 <div class="foot">DocuDesk Web · Файлы не отправляются на сервер приложения. Для работы используются библиотеки PDF.js, pdf-lib и JSZip с CDN.</div>
 </div>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -525,9 +525,9 @@ async function refreshScannerDevices(){
   });
   if([...select.options].some(option=>option.value===previous))select.value=previous;
   if(result.scannerWarning){
-   status('scanner','Список устройств обновлён, но USB-сканер не найден: '+result.scannerWarning,'err');
+   status('scanner','Устройства обновлены. '+(select.options.length?'Найдено устройств: '+select.options.length+'. ':'')+result.scannerWarning,'err');
   }else{
-   status('scanner','Найдено устройств: '+select.options.length+'. Выбери нужный сканер и нажми «Сканировать».','ok');
+   status('scanner','Найдено устройств: '+select.options.length+'. '+(result.networkWarning||'')+' Выбери устройство и нажми «Сканировать».','ok');
   }
  }catch(e){
   console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
@@ -536,17 +536,20 @@ async function refreshScannerDevices(){
 $('scanner-refresh').onclick=refreshScannerDevices;
 $('scanner-check').onclick=async()=>{
  await refreshScannerDevices();
- if($('scan-device').value==='escl:canon-mf440'){
+ const id=$('scan-device').value;
+ if(id.startsWith('escl:')){
   try{
-   const response=await fetch(scanBridge+'/capabilities',{cache:'no-store'}),result=await response.json();
-   if(!response.ok||!result.ok)throw new Error(result.error||'Сканер не отвечает.');
-   status('scanner','Список устройств обновлён. Canon MF440 Series отвечает по eSCL.','ok');
+   const response=await fetch(scanBridge+'/capabilities?device='+encodeURIComponent(id),{cache:'no-store'}),result=await response.json();
+   if(!response.ok||!result.ok)throw new Error(result.error||'Сетевой сканер не отвечает.');
+   status('scanner','Сетевой сканер «'+result.name+'» отвечает. Источники: '+((result.sources||[]).join(', ')||'не указаны')+'.','ok');
   }catch(e){status('scanner','Устройство выбрано, но не отвечает: '+(e.message||'ошибка')+'.','err')}
+ }else if(id.startsWith('wia:')){
+  status('scanner','Устройство обнаружено через Windows WIA. Можно запускать сканирование со стекла.','ok');
  }
 };
 $('scanner-start').onclick=async()=>{
  $('scanner-start').disabled=true;
- status('scanner','Отправляем задание сканирования в Canon… Это может занять несколько минут.');
+ status('scanner','Отправляем задание выбранному сканеру… Это может занять несколько минут.');
  try{
   const response=await fetch(scanBridge+'/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceId:$('scan-device').value,source:$('scan-source').value,colorMode:$('scan-color').value,resolution:Number($('scan-dpi').value),paperSize:$('scan-paper').value})});
   const result=await response.json();
