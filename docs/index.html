@@ -524,10 +524,11 @@ async function refreshScannerDevices(){
    select.append(option);
   });
   if([...select.options].some(option=>option.value===previous))select.value=previous;
-  if(result.scannerWarning){
-   status('scanner','Устройства обновлены. '+(select.options.length?'Найдено устройств: '+select.options.length+'. ':'')+result.scannerWarning,'err');
+  if(select.options.length){
+   const warnings=[result.scannerWarning,result.networkWarning].filter(Boolean).join(' ');
+   status('scanner','Найдено устройств: '+select.options.length+'. '+warnings+' Выбери устройство и нажми «Сканировать».','ok');
   }else{
-   status('scanner','Найдено устройств: '+select.options.length+'. '+(result.networkWarning||'')+' Выбери устройство и нажми «Сканировать».','ok');
+   status('scanner','Сканеры не обнаружены. '+[result.scannerWarning,result.networkWarning].filter(Boolean).join(' '),'err');
   }
  }catch(e){
   console.error(e);status('scanner','Не удалось обновить устройства: '+(e.message||'ошибка')+'. Запусти start_local_bridge.bat и разреши доступ к локальной сети.','err');
