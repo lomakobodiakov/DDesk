@@ -309,16 +309,31 @@ function setupNavigation(){
  async function convertPdfToWord(file){
   if(!window.docx||!window.pdfjsLib)throw new Error('Не удалось загрузить библиотеки PDF/DOCX. Проверьте подключение к интернету.');
   const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,children=[];
+  let textPages=0,imagePages=0;
   for(let i=1;i<=pdf.numPages;i++){
-   convertStatus.textContent='Извлекаем текст: страница '+i+' из '+pdf.numPages+'…';
+   convertStatus.textContent='Обрабатываем страницу '+i+' из '+pdf.numPages+'…';
    const page=await pdf.getPage(i),content=await page.getTextContent(),lines=new Map();
    for(const item of content.items){if(!item.str||!item.str.trim())continue;const y=Math.round(item.transform[5]/3)*3;const line=lines.get(y)||[];line.push({x:item.transform[4],text:item.str});lines.set(y,line)}
-   const ordered=[...lines.entries()].sort((a,b)=>b[0]-a[0]);
-   if(i>1)children.push(new docx.Paragraph({text:'',pageBreakBefore:true}));
-   for(const [,items] of ordered){items.sort((a,b)=>a.x-b.x);const text=items.map(x=>x.text).join(' ').replace(/\s+/g,' ').trim();if(text)children.push(new docx.Paragraph({text}))}
+   const ordered=[...lines.entries()].sort((a,b)=>b[0]-a[0]),pageParagraphs=[];
+   for(const [,items] of ordered){items.sort((a,b)=>a.x-b.x);const lineText=items.map(x=>x.text).join(' ').replace(/\s+/g,' ').trim();if(lineText)pageParagraphs.push(new docx.Paragraph({text:lineText}))}
+   if(i>1)children.push(new docx.Paragraph({children:[new docx.TextRun({text:'',break:1})]}));
+   if(pageParagraphs.length){
+    textPages++;children.push(...pageParagraphs);
+   }else{
+    // Image-only/scanned page: embed a rendered page so the DOCX is not blank.
+    const viewport=page.getViewport({scale:1.5}),canvas=document.createElement('canvas');
+    canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+    await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+    const imageBlob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Не удалось преобразовать страницу '+i+' в изображение.')),'image/png'));
+    const imageBytes=new Uint8Array(await imageBlob.arrayBuffer()),ratio=Math.min(550/canvas.width,720/canvas.height);
+    children.push(new docx.Paragraph({children:[new docx.ImageRun({data:imageBytes,transformation:{width:Math.round(canvas.width*ratio),height:Math.round(canvas.height*ratio)}})]}));
+    canvas.width=canvas.height=0;imagePages++;
+   }
   }
+  if(!children.length)throw new Error('В PDF не удалось обнаружить ни текст, ни страницы для переноса.');
   const document=new docx.Document({sections:[{children}]});
   const blob=await docx.Packer.toBlob(document);download(blob,safeName(file.name)+'-converted.docx');
+  convertStatus.textContent='DOCX создан. Текстовых страниц: '+textPages+'. Страниц, перенесённых как изображения: '+imagePages+'.';
  }
  async function convertPdfToPowerPoint(file){
   if(!window.pdfjsLib)throw new Error('Не удалось загрузить PDF.js.');
