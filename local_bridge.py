@@ -161,97 +161,6 @@ def scan_escl(device: dict, source: str, color_mode: str, resolution: int, paper
     return pages
 
 
-def make_scan_settings(source: str, color_mode: str, resolution: int, paper_size: str) -> bytes:
-    if source not in ALLOWED_SOURCES:
-        raise ScannerError("Источник должен быть Platen (стекло) или Feeder (автоподатчик).")
-    if color_mode not in ALLOWED_COLOR_MODES:
-        raise ScannerError("Неподдерживаемый режим цвета.")
-    if resolution not in ALLOWED_RESOLUTIONS:
-        raise ScannerError("Разрешение должно быть 150, 300 или 600 dpi.")
-    if paper_size not in PAPER_SIZES:
-        raise ScannerError("Неподдерживаемый формат бумаги.")
-    width, height = PAPER_SIZES[paper_size]
-    xml = f'''<?xml version="1.0" encoding="UTF-8"?>
-<scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"
- xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"
- xmlns:escl="http://schemas.hp.com/imaging/escl/2011/05/03">
-  <pwg:Version>2.0</pwg:Version>
-  <pwg:ScanRegions>
-    <pwg:ScanRegion>
-      <pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
-      <pwg:XOffset>0</pwg:XOffset>
-      <pwg:YOffset>0</pwg:YOffset>
-      <pwg:Width>{width}</pwg:Width>
-      <pwg:Height>{height}</pwg:Height>
-    </pwg:ScanRegion>
-  </pwg:ScanRegions>
-  <pwg:InputSource>{source}</pwg:InputSource>
-  <scan:ColorMode>{color_mode}</scan:ColorMode>
-  <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
-  <scan:XResolution>{resolution}</scan:XResolution>
-  <scan:YResolution>{resolution}</scan:YResolution>
-</scan:ScanSettings>'''
-    return xml.encode("utf-8")
-
-
-def scan_document(settings: bytes) -> list[dict]:
-    status, headers, data = printer_request(
-        "POST", SCAN_JOBS_PATH, settings,
-        {"Content-Type": "text/xml; charset=utf-8", "Accept": "application/xml, text/xml"},
-        timeout=20,
-    )
-    if status not in (200, 201):
-        detail = data.decode("utf-8", errors="replace")[:500]
-        raise ScannerError(f"МФУ отклонило задание (HTTP {status}). {detail}")
-    location = next((v for k, v in headers.items() if k.lower() == "location"), "")
-    job_url = safe_job_url(location)
-    job_path = urlsplit(job_url).path
-    pages = []
-    try:
-        for page_index in range(MAX_SCAN_PAGES):
-            page_status = None
-            page_headers: dict[str, str] = {}
-            page_data = b""
-            # Some scanners return 503 briefly while the next page is being prepared.
-            for attempt in range(90):
-                page_status, page_headers, page_data = printer_request(
-                    "GET", job_path + "/NextDocument",
-                    headers={"Accept": "image/jpeg, image/png, application/octet-stream"},
-                    timeout=90,
-                )
-                if page_status == 503:
-                    time.sleep(1)
-                    continue
-                break
-            if page_status in (404, 410):
-                if not pages:
-                    raise ScannerError("Сканер завершил задание, но не вернул изображение. Проверьте бумагу и источник.")
-                break
-            if page_status != 200:
-                detail = page_data.decode("utf-8", errors="replace")[:300]
-                raise ScannerError(f"Не удалось получить страницу {page_index + 1} (HTTP {page_status}). {detail}")
-            if not page_data:
-                raise ScannerError(f"Сканер вернул пустую страницу №{page_index + 1}.")
-            content_type = next((v.split(";")[0].strip().lower() for k, v in page_headers.items()
-                                 if k.lower() == "content-type"), "image/jpeg")
-            if content_type not in ("image/jpeg", "image/png"):
-                raise ScannerError(f"Формат изображения {content_type} пока не поддерживается в PDF DocuDesk.")
-            pages.append({
-                "name": f"scan_{page_index + 1:03d}.jpg" if content_type == "image/jpeg" else f"scan_{page_index + 1:03d}.png",
-                "content_type": content_type,
-                "size": len(page_data),
-                "data": base64.b64encode(page_data).decode("ascii"),
-            })
-            if len(pages) >= MAX_SCAN_PAGES:
-                break
-    finally:
-        try:
-            printer_request("DELETE", job_path, headers={"Accept": "*/*"}, timeout=5)
-        except Exception:
-            pass
-    return pages
-
-
 def list_wia_scanners() -> tuple[list[dict], str | None]:
     """Enumerate Windows WIA scanners on this worker thread."""
     if os.name != "nt":
@@ -290,8 +199,8 @@ def list_wia_scanners() -> tuple[list[dict], str | None]:
         if devices:
             return devices, None
         if item_errors:
-            return [], "Windows WIA запустился, но не смог прочитать устройства. Проверьте драйвер сканера HP."
-        return [], "Windows WIA не обнаружил сканеры. Установите полный драйвер HP Laser MFP 135w с поддержкой WIA/TWAIN и перезапустите помощник."
+            return [], "Windows WIA запустился, но не смог прочитать устройства: " + "; ".join(item_errors[:2])
+        return [], "Windows WIA не обнаружил сканеры. Проверьте подключение и установку драйвера с поддержкой WIA."
     except Exception as exc:
         return [], "Не удалось обратиться к Windows WIA: " + str(exc)
     finally:
