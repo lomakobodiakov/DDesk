@@ -10,10 +10,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-py -3 -c "import win32com.client; from PIL import Image" >nul 2>nul
+py -3 -c "import win32com.client; from PIL import Image; import zeroconf" >nul 2>nul
 if errorlevel 1 (
-  echo Installing required Windows scanner components...
-  py -3 -m pip install --user --upgrade pywin32 Pillow
+  echo Installing required scanner components (WIA + network discovery)...
+  py -3 -m pip install --user --upgrade pywin32 Pillow zeroconf
   if errorlevel 1 (
     echo.
     echo Could not install scanner components. Check internet access and Python installation.
