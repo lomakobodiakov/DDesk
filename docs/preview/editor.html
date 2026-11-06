@@ -10,6 +10,33 @@
 </head>
 <body>
 <div class="panel">
+ <div class="controls" id="editor-mode-switch">
+  <button class="btn secondary" id="mode-single">Обычное редактирование</button>
+  <button class="btn" id="mode-two-sided">Две стороны на одном листе</button>
+ </div>
+ <section id="two-sided-panel" hidden>
+  <h2 style="font-size:19px;margin:4px 0 6px">Двусторонний документ на одном листе</h2>
+  <p class="hint">Добавьте лицевую и обратную стороны паспорта или другого документа. Они будут расположены сверху и снизу на одном вертикальном листе A4.</p>
+  <div class="top" style="align-items:stretch">
+   <div style="flex:1;min-width:220px">
+    <label for="side-front">1. Лицевая сторона — верх листа</label>
+    <label class="drop" for="side-front"><strong>＋ Добавить лицевую сторону</strong><small>JPG, PNG, WebP или PDF</small><input id="side-front" type="file" accept="image/*,.pdf,application/pdf" hidden></label>
+    <div class="controls"><button class="btn secondary" id="front-rotate" disabled>↻ Повернуть</button><span class="hint" id="front-name">Файл не выбран</span></div>
+   </div>
+   <div style="flex:1;min-width:220px">
+    <label for="side-back">2. Обратная сторона — низ листа</label>
+    <label class="drop" for="side-back"><strong>＋ Добавить обратную сторону</strong><small>JPG, PNG, WebP или PDF</small><input id="side-back" type="file" accept="image/*,.pdf,application/pdf" hidden></label>
+    <div class="controls"><button class="btn secondary" id="back-rotate" disabled>↻ Повернуть</button><span class="hint" id="back-name">Файл не выбран</span></div>
+   </div>
+  </div>
+  <div class="controls"><label for="side-gap" style="margin:0">Расстояние между сторонами</label><select class="field" id="side-gap"><option value="12">Обычное</option><option value="4">Минимальное</option><option value="24">Увеличенное</option></select><label for="side-margin" style="margin:0">Поля</label><select class="field" id="side-margin"><option value="24">Стандартные</option><option value="12">Узкие</option><option value="36">Широкие</option></select></div>
+  <div class="canvas-wrap" style="max-height:75vh"><canvas id="two-sided-canvas" style="width:auto;max-width:100%;max-height:70vh;cursor:default;touch-action:auto"></canvas></div>
+  <div class="controls"><button class="btn" id="two-sided-save" disabled>Сохранить PDF A4</button><button class="btn secondary" id="two-sided-clear">Очистить обе стороны</button></div>
+  <div class="status" id="two-sided-status" aria-live="polite">Добавьте обе стороны документа.</div>
+  <p class="hint">Изображения вписываются в верхнюю и нижнюю области без искажения пропорций. Перед печатью откройте PDF и выберите формат бумаги A4 и масштаб «Фактический размер» или 100%.</p>
+ </section>
+ <div id="single-editor-content">
+
  <div class="top">
   <div><label for="kind">Тип файла</label><select id="kind" class="field"><option value="image">Изображение JPG / PNG / WebP</option><option value="pdf">PDF-документ</option></select></div>
   <div><label for="format">Формат сохранения</label><select id="format" class="field"><option value="image/jpeg">JPG</option><option value="image/png">PNG</option><option value="image/webp">WebP</option><option value="application/pdf">PDF</option></select></div>
@@ -34,6 +61,8 @@
  <div class="controls"><button class="btn" id="save" disabled>Сохранить результат</button><button class="btn secondary" id="reset" disabled>Сбросить обрезку</button><button class="btn secondary" id="clear" disabled>Очистить</button></div>
  <div class="status" id="status" aria-live="polite">Выберите файл, чтобы начать.</div>
  <p class="hint">Файлы обрабатываются в браузере. Для PDF яркость, контрастность и устранение перекоса применяются ко всем страницам; экспорт выполняется как изображения внутри PDF, поэтому текст после обработки нельзя будет выделять или искать. Проверяйте результат перед использованием официальных документов.</p>
+
+ </div>
 </div>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -126,6 +155,61 @@ $('save').addEventListener('click',async()=>{try{
   }download(new Blob([await out.save()],{type:'application/pdf'}),safeName(file.name)+'-edited.pdf');say('PDF сохранён: '+source.numPages+' стр. '+(a4Mode?'на листах A4. ':'')+'Страницы после обработки являются изображениями.','ok')
  }
 }catch(e){console.error('DocuDesk save:',e);say(e.message||'Ошибка сохранения.','err')}finally{$('save').disabled=!work}});
+
+const twoSide={front:null,back:null,frontRotation:0,backRotation:0};
+const twoCanvas=$('two-sided-canvas'),twoCtx=twoCanvas.getContext('2d');
+function twoSay(message,kind=''){const el=$('two-sided-status');el.textContent=message;el.className='status '+kind}
+function loadSideFile(file,slot){
+ if(!file)return;
+ const done=(img)=>{twoSide[slot]=img;twoSide[slot+'Rotation']=0;$((slot==='front'?'front-name':'back-name')).textContent=file.name;$((slot==='front'?'front-rotate':'back-rotate')).disabled=false;drawTwoSided();twoSay((slot==='front'?'Лицевая':'Обратная')+' сторона загружена.','ok')};
+ if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){
+  if(!window.pdfjsLib){twoSay('PDF.js не загрузился.','err');return}
+  file.arrayBuffer().then(bytes=>pdfjsLib.getDocument({data:bytes}).promise).then(doc=>doc.getPage(1)).then(page=>{
+   const vp=page.getViewport({scale:2}),c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);
+   return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise.then(()=>{const img=new Image();img.onload=()=>done(img);img.src=c.toDataURL('image/png')})
+  }).catch(e=>twoSay(e.message||'Не удалось открыть PDF.','err'));
+ }else if(file.type.startsWith('image/')){
+  const url=URL.createObjectURL(file),img=new Image();img.onload=()=>{URL.revokeObjectURL(url);done(img)};img.onerror=()=>{URL.revokeObjectURL(url);twoSay('Не удалось открыть изображение.','err')};img.src=url;
+ }else twoSay('Поддерживаются изображения и PDF.','err');
+}
+function drawTwoSided(){
+ const W=1190,H=1684,margin=Number($('side-margin').value)*2,gap=Number($('side-gap').value)*2;
+ twoCanvas.width=W;twoCanvas.height=H;const c=twoCtx;c.fillStyle='#fff';c.fillRect(0,0,W,H);
+ const slotH=(H-margin*2-gap)/2,slotW=W-margin*2;
+ function draw(img,rotation,y){
+  if(!img)return;
+  const angle=rotation*Math.PI/180,iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
+  const rw=Math.abs(iw*Math.cos(angle))+Math.abs(ih*Math.sin(angle)),rh=Math.abs(iw*Math.sin(angle))+Math.abs(ih*Math.cos(angle));
+  const fit=Math.min(slotW/rw,slotH/rh),dw=rw*fit,dh=rh*fit;
+  c.save();c.translate(W/2,y+slotH/2);c.rotate(angle);c.drawImage(img,-iw*fit/2,-ih*fit/2,iw*fit,ih*fit);c.restore();
+ }
+ c.strokeStyle='#d5d7dc';c.lineWidth=2;c.setLineDash([10,8]);c.strokeRect(margin,margin,slotW,slotH);c.strokeRect(margin,margin+slotH+gap,slotW,slotH);c.setLineDash([]);
+ draw(twoSide.front,twoSide.frontRotation,margin);draw(twoSide.back,twoSide.backRotation,margin+slotH+gap);
+ c.fillStyle='#8b8b91';c.font='24px sans-serif';c.textAlign='center';
+ if(!twoSide.front)c.fillText('Лицевая сторона — верх',W/2,margin+slotH/2);
+ if(!twoSide.back)c.fillText('Обратная сторона — низ',W/2,margin+slotH+gap+slotH/2);
+ $('two-sided-save').disabled=!(twoSide.front&&twoSide.back);
+}
+$('side-front').addEventListener('change',e=>loadSideFile(e.target.files[0],'front'));
+$('side-back').addEventListener('change',e=>loadSideFile(e.target.files[0],'back'));
+$('front-rotate').addEventListener('click',()=>{twoSide.frontRotation=(twoSide.frontRotation+90)%360;drawTwoSided()});
+$('back-rotate').addEventListener('click',()=>{twoSide.backRotation=(twoSide.backRotation+90)%360;drawTwoSided()});
+$('side-gap').addEventListener('change',drawTwoSided);$('side-margin').addEventListener('change',drawTwoSided);
+$('two-sided-clear').addEventListener('click',()=>{twoSide.front=twoSide.back=null;twoSide.frontRotation=twoSide.backRotation=0;$('side-front').value='';$('side-back').value='';$('front-name').textContent=$('back-name').textContent='Файл не выбран';$('front-rotate').disabled=$('back-rotate').disabled=true;drawTwoSided();twoSay('Обе стороны очищены.')});
+$('two-sided-save').addEventListener('click',async()=>{
+ try{
+  if(!twoSide.front||!twoSide.back)throw Error('Добавьте обе стороны документа.');
+  $('two-sided-save').disabled=true;twoSay('Создаём PDF формата A4…');
+  const jpg=await new Promise((resolve,reject)=>twoCanvas.toBlob(b=>b?resolve(b):reject(Error('Не удалось сформировать изображение.')),'image/jpeg',.96));
+  const doc=await PDFLib.PDFDocument.create(),embedded=await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer())),page=doc.addPage([595.276,841.89]);
+  page.drawImage(embedded,{x:0,y:0,width:page.getWidth(),height:page.getHeight()});
+  download(new Blob([await doc.save()],{type:'application/pdf'}),'DocuDesk-two-sided-A4.pdf');twoSay('Готово: обе стороны размещены на одном листе A4.','ok');
+ }catch(e){twoSay(e.message||'Не удалось создать PDF.','err')}finally{drawTwoSided()}
+});
+$('mode-two-sided').addEventListener('click',()=>{$('single-editor-content').hidden=true;$('two-sided-panel').hidden=false;$('mode-two-sided').classList.remove('secondary');$('mode-single').classList.add('secondary');drawTwoSided()});
+$('mode-single').addEventListener('click',()=>{$('two-sided-panel').hidden=true;$('single-editor-content').hidden=false;$('mode-single').classList.remove('secondary');$('mode-two-sided').classList.add('secondary')});
+drawTwoSided();
+
 window.DocuDeskEditorOpenFile=async function(incomingFile){
  try{
   // File objects passed from the parent page belong to a different JS realm,
