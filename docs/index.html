@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f7f8fc">
+<link rel="icon" type="image/x-icon" href="favicon.ico?v=1">
+<link rel="shortcut icon" href="favicon.ico?v=1">
+<meta name="apple-mobile-web-app-title" content="DocuDesk">
 <title>DocuDesk Web — документы в браузере</title>
 <style>
 :root{--ink:#202938;--muted:#667085;--line:#e4e8f0;--accent:#d92d4a;--bg:#f5f7fb;--card:#fff}
@@ -19,6 +22,8 @@ html{scroll-behavior:smooth}
 body{background:radial-gradient(ellipse at 50% -15%,#fff 0,transparent 52%),var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:-.01em}
 .wrap{max-width:1160px;padding:30px 26px 58px}
 .top{gap:14px;margin-bottom:28px}
+.logo-img{width:66px;height:52px;object-fit:contain;object-position:left center;flex:0 0 auto;display:block}
+.side-brand .logo-img{width:68px;height:48px;object-fit:contain;object-position:left center}
 .logo{width:44px;height:44px;border-radius:13px;background:linear-gradient(145deg,#3a3a3c,#111113);color:#fff;font-size:22px;box-shadow:0 5px 16px #00000017}
 .brand{font-size:23px;font-weight:750;letter-spacing:-1.05px}
 .top .sub{font-size:12px;letter-spacing:0}
@@ -126,7 +131,7 @@ body{min-height:100vh}
 </head>
 <body>
 <div class="wrap">
-<header class="top"><div class="logo">▣</div><div><div class="brand">DocuDesk <span style="color:var(--accent)">Web</span></div><div class="sub">Инструменты для документов прямо в браузере</div></div><div class="pill">Веб-версия · 0.1</div></header>
+<header class="top"><img class="logo-img" src="docudesk-logo.webp" alt="DocuDesk"><div><div class="brand">DocuDesk <span style="color:var(--accent)">Web</span></div><div class="sub">Инструменты для документов прямо в браузере</div></div><div class="pill">Веб-версия · 0.1</div></header>
 <section class="hero"><h1>Все нужные операции с PDF — в одном месте</h1><p>Объединяйте документы, разделяйте страницы и конвертируйте изображения. Без установки программ и регистрации.</p><div class="privacy">✓ Файлы обрабатываются прямо в вашем браузере</div></section>
 <main class="grid">
 <section class="tool" id="merge"><div class="icon">⇄</div><h2>Объединить PDF</h2><p>Соберите несколько PDF в один документ. Порядок файлов можно менять кнопками ↑ ↓.</p><label class="drop" data-drop="merge"><strong>＋ Выберите PDF или перетащите сюда</strong><small>Можно выбрать несколько файлов · PDF</small><input hidden type="file" accept="application/pdf,.pdf" multiple></label><ul class="filelist" id="merge-list"></ul><div class="controls"><button class="btn secondary" id="merge-up">↑ Выше</button><button class="btn secondary" id="merge-down">↓ Ниже</button><button class="btn" id="merge-go" disabled>Объединить и скачать</button></div><div class="status" id="merge-status" aria-live="polite"></div></section>
@@ -170,7 +175,7 @@ function setupNavigation(){
  const ocr=$('ocr'),scanner=$('scanner'),note=root.querySelector('.note'),foot=root.querySelector('.foot');
  const shell=document.createElement('div');shell.className='app-shell';
  const sidebar=document.createElement('aside');sidebar.className='sidebar';sidebar.setAttribute('aria-label','Главная навигация');
- sidebar.innerHTML='<div class="side-brand"><div class="logo">▣</div><div><div class="brand">DocuDesk</div><div class="sub">Рабочее пространство</div></div></div><div><div class="nav-caption">Рабочее пространство</div><nav class="side-nav" aria-label="Разделы"><button class="nav-item active" data-page="home"><span class="nav-icon">⌂</span><span>Главная</span></button><button class="nav-item" data-page="pdf"><span class="nav-icon">▤</span><span>PDF-инструменты</span></button><button class="nav-item" data-page="convert"><span class="nav-icon">⇄</span><span>Конвертация</span></button><button class="nav-item" data-page="ocr"><span class="nav-icon">Aa</span><span>Распознавание</span></button><button class="nav-item" data-page="scanner"><span class="nav-icon">▧</span><span>Сканирование</span></button><button class="nav-item" data-page="editor"><span class="nav-icon">✎</span><span>Редактор изображений</span></button><button class="nav-item" data-page="grouping"><span class="nav-icon">▣</span><span>Группирование документов</span></button><button class="nav-item" data-page="about"><span class="nav-icon">ⓘ</span><span>О приложении</span></button></nav></div><div class="sidebar-bottom">DocuDesk Web · 0.2<br>Документы остаются на вашем устройстве</div>';
+ sidebar.innerHTML='<div class="side-brand"><img class="logo-img" src="docudesk-logo.webp" alt="DocuDesk"><div><div class="brand">DocuDesk</div><div class="sub">Рабочее пространство</div></div></div><div><div class="nav-caption">Рабочее пространство</div><nav class="side-nav" aria-label="Разделы"><button class="nav-item active" data-page="home"><span class="nav-icon">⌂</span><span>Главная</span></button><button class="nav-item" data-page="pdf"><span class="nav-icon">▤</span><span>PDF-инструменты</span></button><button class="nav-item" data-page="convert"><span class="nav-icon">⇄</span><span>Конвертация</span></button><button class="nav-item" data-page="ocr"><span class="nav-icon">Aa</span><span>Распознавание</span></button><button class="nav-item" data-page="scanner"><span class="nav-icon">▧</span><span>Сканирование</span></button><button class="nav-item" data-page="editor"><span class="nav-icon">✎</span><span>Редактор изображений</span></button><button class="nav-item" data-page="grouping"><span class="nav-icon">▣</span><span>Группирование документов</span></button><button class="nav-item" data-page="about"><span class="nav-icon">ⓘ</span><span>О приложении</span></button></nav></div><div class="sidebar-bottom">DocuDesk Web · 0.2<br>Документы остаются на вашем устройстве</div>';
  const content=document.createElement('div');content.className='app-content';
  const inner=document.createElement('div');inner.className='wrap';
  const appHeader=header;appHeader.querySelector('.sub').textContent='Простая работа с документами';
