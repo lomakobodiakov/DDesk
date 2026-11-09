@@ -40,6 +40,8 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --onedir `
             --name DocuDesk `
+            --icon src/docudesk/assets/docudesk.ico `
+            --add-data "src/docudesk/assets;docudesk/assets" `
             --paths src `
             --collect-all fitz `
             --collect-all pymupdf `
