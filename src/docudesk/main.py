@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton, QSpinBox,
@@ -15,6 +16,8 @@ from .operations import compress_pdf, images_to_pdf, merge_pdfs, pdf_to_images, 
 from .scanner import list_scanners, scan_one_page
 
 APP_NAME = "DocuDesk"
+ASSET_DIR = Path(__file__).resolve().parent / "assets"
+APP_ICON = ASSET_DIR / "docudesk.ico"
 
 
 class ToolPanel(QWidget):
@@ -49,6 +52,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} — документы и сканирование")
+        if APP_ICON.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON)))
         self.resize(1000, 700)
         self.setMinimumSize(800, 560)
         self.setStyleSheet("""
@@ -71,8 +76,13 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(22, 18, 22, 20)
         root_layout.setSpacing(14)
         header = QHBoxLayout()
-        logo = QLabel("▣")
-        logo.setStyleSheet("background:#d92d4a;color:white;border-radius:9px;font-size:25px;font-weight:bold;padding:8px 12px;")
+        logo = QLabel()
+        logo.setFixedSize(72, 56)
+        if APP_ICON.exists():
+            logo.setPixmap(QIcon(str(APP_ICON)).pixmap(64, 64))
+        else:
+            logo.setText("▣")
+            logo.setStyleSheet("background:#d92d4a;color:white;border-radius:9px;font-size:25px;font-weight:bold;padding:8px 12px;")
         header.addWidget(logo)
         name_box = QVBoxLayout()
         name = QLabel("DocuDesk")
@@ -351,6 +361,8 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    if APP_ICON.exists():
+        app.setWindowIcon(QIcon(str(APP_ICON)))
     app.setOrganizationName("DocuDesk")
     window = MainWindow()
     window.show()
