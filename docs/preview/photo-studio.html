@@ -40,18 +40,99 @@ function sizeCanvases(w,h){view.width=w;view.height=h;paint.width=w;paint.height
 function show(){if(!current)return;sizeCanvases(current.width,current.height);ctx.clearRect(0,0,view.width,view.height);ctx.drawImage(current,0,0);$('canvasWrap').hidden=false;$('empty').hidden=true;$('save').disabled=false;modified=true;}
 function loadImage(file){if(!file||!file.type.startsWith('image/'))return;const url=URL.createObjectURL(file),im=new Image();im.onload=()=>{const scale=Math.min(1,3000/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);original=c;current=c;mask=null;show();say('Изображение загружено: '+c.width+' × '+c.height);URL.revokeObjectURL(url)};im.onerror=()=>say('Не удалось открыть изображение');im.src=url;}
 $('file').onchange=e=>loadImage(e.target.files[0]);
-tabs.forEach(b=>b.onclick=()=>{tool=b.dataset.tool;tabs.forEach(x=>x.classList.toggle('active',x===b));$('toolTitle').textContent=b.textContent;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';renderControls();say('Режим: '+b.textContent)});
+tabs.forEach(b=>b.onclick=()=>{tool=b.dataset.tool;tabs.forEach(x=>x.classList.toggle('active',x===b));$('toolTitle').textContent=b.textContent;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';renderControls();updateActionLabel();say('Режим: '+b.textContent)});
 function renderControls(){const c=$('controls');if(tool==='bg'){c.innerHTML='<p class="hint">AI автоматически выделит главный объект и удалит фон.</p><div class="control"><label>Фон результата</label><select id="bgMode"><option value="transparent">Прозрачный</option><option value="white">Белый</option><option value="custom">Свой цвет</option></select></div><div class="control" id="colorWrap" hidden><label>Цвет фона</label><input type="color" id="bgColor" value="#ffffff"></div>';const s=$('bgMode');s.onchange=()=>{$('colorWrap').hidden=s.value!=='custom'};}
 else if(tool==='erase'){c.innerHTML='<p class="hint">Закрасьте ненужный объект кистью. Чем точнее выделение, тем аккуратнее восстановление фона.</p><div class="control"><label>Размер кисти <span id="brushVal">28 px</span></label><input id="brush" type="range" min="5" max="120" value="28"></div><p class="hint">ЛКМ — отметить объект. Нажмите «Применить» для удаления выделенной области.</p><button id="clearMask" class="secondary">Очистить выделение</button>'; $('brush').oninput=e=>{brush=+e.target.value;$('brushVal').textContent=brush+' px'};$('clearMask').onclick=()=>{pctx.clearRect(0,0,paint.width,paint.height);mask=null};}
-else{c.innerHTML='<p class="hint">Настройте изображение. Изменения можно сравнить и сохранить отдельно.</p>'+[['Яркость','brightness',-50,50,0],['Контраст','contrast',-50,70,0],['Насыщенность','saturation',-50,70,0],['Резкость','sharpness',0,100,20],['Уменьшение шума','denoise',0,5,0]].map(a=>'<div class="control"><label>'+a[0]+' <span id="'+a[1]+'Val">'+a[4]+'</span></label><input type="range" id="'+a[1]+'" min="'+a[2]+'" max="'+a[3]+'" value="'+a[4]+'"></div>').join('')+'<div class="control"><label>Увеличение</label><select id="upscale"><option value="1">Оригинальный размер</option><option value="1.5">1,5×</option><option value="2">2×</option></select></div>';['brightness','contrast','saturation','sharpness','denoise'].forEach(id=>$(id).oninput=e=>$(id+'Val').textContent=e.target.value);}}
+else{c.innerHTML='<p class="hint">Автоматическое AI-улучшение фотографии. Модель сама восстановит детали и увеличит разрешение примерно в 2 раза. Никаких ручных настроек.</p><div class="control"><div class="hint">При первом запуске браузер загрузит AI-модель (около 40–50 МБ). Далее она будет использоваться из кэша. Фотография обрабатывается прямо на устройстве и не отправляется на сервер.</div></div>';}}
 renderControls();
+function updateActionLabel(){ $('apply').textContent=tool==='bg'?'Удалить фон':tool==='erase'?'Удалить объект':'Улучшить фото'; }
+updateActionLabel();
 function pointer(e){const r=paint.getBoundingClientRect();return{x:(e.clientX-r.left)*paint.width/r.width,y:(e.clientY-r.top)*paint.height/r.height}}
 function stroke(e){const q=pointer(e);pctx.fillStyle='rgba(239,68,68,.42)';pctx.beginPath();pctx.arc(q.x,q.y,brush/2,0,Math.PI*2);pctx.fill();if(!mask){mask=document.createElement('canvas');mask.width=paint.width;mask.height=paint.height;}const m=mask.getContext('2d');m.fillStyle='white';m.beginPath();m.arc(q.x,q.y,brush/2,0,Math.PI*2);m.fill();}
 paint.addEventListener('pointerdown',e=>{if(tool!=='erase'||!current)return;painting=true;paint.setPointerCapture(e.pointerId);stroke(e)});paint.addEventListener('pointermove',e=>{if(painting)stroke(e)});paint.addEventListener('pointerup',()=>painting=false);paint.addEventListener('pointercancel',()=>painting=false);
 $('reset').onclick=()=>{if(!original)return;current=original;mask=null;pctx.clearRect(0,0,paint.width,paint.height);show();say('Изменения сброшены.')};
 async function removeBackground(){say('Загружаем AI-модель удаления фона…');const {removeBackground}=await import('https://esm.sh/@imgly/background-removal@1.5.5');const blob=await new Promise(r=>current.toBlob(r,'image/png'));const result=await removeBackground(blob,{progress:(key,cur,total)=>say('Загрузка модели: '+key+' '+Math.round(cur/total*100)+'%')});let out=await createImageBitmap(result);const c=document.createElement('canvas');c.width=out.width;c.height=out.height;const x=c.getContext('2d');x.drawImage(out,0,0);const mode=$('bgMode').value;if(mode!=='transparent'){x.globalCompositeOperation='destination-over';x.fillStyle=mode==='white'?'#fff':$('bgColor').value;x.fillRect(0,0,c.width,c.height)}current=c;show();say('Фон удалён. Проверьте края объекта и сохраните результат.');}
-async function eraseObject(){if(!mask){throw Error('Сначала закрасьте объект кистью.')}say('Загружаем OpenCV для восстановления области…');if(!window.cv||!window.cv.Mat){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://docs.opencv.org/4.x/opencv.js';s.onload=()=>{const start=Date.now();const check=()=>{if(window.cv&&cv.Mat)resolve();else if(Date.now()-start>30000)reject(Error('OpenCV не загрузился'));else setTimeout(check,100)};check()};s.onerror=()=>reject(Error('Не удалось загрузить OpenCV'));document.head.appendChild(s)})}say('Восстанавливаем выделенную область…');const src=cv.imread(view),m=cv.imread(mask);const gray=new cv.Mat();cv.cvtColor(m,gray,cv.COLOR_RGBA2GRAY);const dst=new cv.Mat();cv.inpaint(src,gray,dst,5,cv.INPAINT_TELEA);cv.imshow(view,dst);current=document.createElement('canvas');current.width=dst.cols;current.height=dst.rows;current.getContext('2d').drawImage(view,0,0);src.delete();m.delete();gray.delete();dst.delete();mask=null;pctx.clearRect(0,0,paint.width,paint.height);say('Объект удалён. На сложном фоне могут быть заметны следы восстановления.');}
-function enhance(){const b=+$('brightness').value,co=+$('contrast').value,sa=+$('saturation').value,sharp=+$('sharpness').value,noise=+$('denoise').value,up=+$('upscale').value;const src=document.createElement('canvas');src.width=view.width;src.height=view.height;src.getContext('2d').drawImage(view,0,0);let c=document.createElement('canvas');c.width=Math.round(src.width*up);c.height=Math.round(src.height*up);let x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(src,0,0,c.width,c.height);let im=x.getImageData(0,0,c.width,c.height),d=im.data;const contrast=(259*(co+255))/(255*(259-co));for(let i=0;i<d.length;i+=4){let r=d[i],g=d[i+1],bl=d[i+2],avg=.299*r+.587*g+.114*bl;r=avg+(r-avg)*(1+sa/100);g=avg+(g-avg)*(1+sa/100);bl=avg+(bl-avg)*(1+sa/100);d[i]=Math.max(0,Math.min(255,contrast*(r-128)+128+b*2.55));d[i+1]=Math.max(0,Math.min(255,contrast*(g-128)+128+b*2.55));d[i+2]=Math.max(0,Math.min(255,contrast*(bl-128)+128+b*2.55));}x.putImageData(im,0,0);if(noise){const temp=document.createElement('canvas');temp.width=c.width;temp.height=c.height;const tx=temp.getContext('2d');tx.filter='blur('+noise*.35+'px)';tx.drawImage(c,0,0);x.globalAlpha=Math.min(.45,noise*.07);x.drawImage(temp,0,0);x.globalAlpha=1;}if(sharp){const originalData=x.getImageData(0,0,c.width,c.height),srcData=originalData.data,out=x.createImageData(c.width,c.height),o=out.data;for(let y=1;y<c.height-1;y++)for(let xx=1;xx<c.width-1;xx++){let i=(y*c.width+xx)*4;for(let k=0;k<3;k++){let v=srcData[i+k]* (1+4*sharp/100);v-=sharp/100*(srcData[i-4+k]+srcData[i+4+k]+srcData[i-c.width*4+k]+srcData[i+c.width*4+k]);o[i+k]=Math.max(0,Math.min(255,v));}o[i+3]=srcData[i+3];}x.putImageData(out,0,0);}current=c;show();say('Обработка завершена. Это базовое улучшение, а не AI-восстановление деталей.');}
-$('apply').onclick=async()=>{if(!current){say('Сначала загрузите изображение.');return} $('apply').disabled=true;try{if(tool==='bg')await removeBackground();else if(tool==='erase')await eraseObject();else enhance()}catch(e){console.error(e);say('Ошибка: '+e.message)}finally{$('apply').disabled=false}};
+async function eraseObject(){
+ if(!mask) throw new Error('Сначала закрасьте объект кистью.');
+ say('Загружаем OpenCV для удаления объекта…');
+ if(!window.cv || !window.cv.Mat){
+  await new Promise((resolve,reject)=>{
+   const existing=document.querySelector('script[data-opencv-loader]');
+   const started=Date.now();
+   const check=()=>{
+    if(window.cv && window.cv.Mat){resolve();return}
+    if(Date.now()-started>45000){reject(new Error('OpenCV не инициализировался за 45 секунд. Проверьте подключение к интернету и попробуйте ещё раз.'));return}
+    setTimeout(check,120);
+   };
+   if(!existing){
+    const script=document.createElement('script');
+    script.dataset.opencvLoader='1';
+    script.src='https://docs.opencv.org/4.x/opencv.js';
+    script.onerror=()=>reject(new Error('Не удалось загрузить OpenCV с сервера.'));
+    document.head.appendChild(script);
+   }
+   check();
+  });
+ }
+ say('Восстанавливаем фон вокруг выделения…');
+ const src=cv.imread(view);
+ const rgb=new cv.Mat();
+ const maskRgba=cv.imread(mask);
+ const gray=new cv.Mat();
+ const binary=new cv.Mat();
+ const dst=new cv.Mat();
+ const rgba=new cv.Mat();
+ try{
+  if(src.channels()===4) cv.cvtColor(src,rgb,cv.COLOR_RGBA2RGB);
+  else if(src.channels()===3) src.copyTo(rgb);
+  else throw new Error('Неожиданный формат исходного изображения: '+src.channels()+' каналов.');
+  cv.cvtColor(maskRgba,gray,cv.COLOR_RGBA2GRAY);
+  cv.threshold(gray,binary,8,255,cv.THRESH_BINARY);
+  const radius=Math.max(3,Math.min(12,Math.round(brush/7)));
+  cv.inpaint(rgb,binary,dst,radius,cv.INPAINT_TELEA);
+  cv.cvtColor(dst,rgba,cv.COLOR_RGB2RGBA);
+  cv.imshow(view,rgba);
+  const result=document.createElement('canvas');
+  result.width=rgba.cols;result.height=rgba.rows;
+  result.getContext('2d').drawImage(view,0,0);
+  current=result;
+  mask=null;
+  pctx.clearRect(0,0,paint.width,paint.height);
+  show();
+  say('Объект удалён. На сложном фоне могут оставаться следы — попробуйте выделить область чуть шире.');
+ }finally{
+  [src,rgb,maskRgba,gray,binary,dst,rgba].forEach(m=>{if(m&&!m.isDeleted())m.delete()});
+ }
+}
+let aiEnhancer=null;
+async function enhance(){
+ say('Подготавливаем AI-модель улучшения фотографии…');
+ const {pipeline,RawImage,env}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+ env.allowLocalModels=false;
+ env.useBrowserCache=true;
+ if(!aiEnhancer){
+  say('Загружаем AI-модель (первый запуск может занять некоторое время)…');
+  aiEnhancer=await pipeline('image-to-image','Xenova/swin2SR-lightweight-x2-64',{
+   dtype:'q8',
+   progress_callback:p=>{
+    if(p.status==='progress' && p.file) say('Загрузка AI-модели: '+p.file+(Number.isFinite(p.progress)?' — '+Math.round(p.progress)+'%':''));
+    else if(p.status==='done') say('AI-модель загружена. Подготавливаем фотографию…');
+   }
+  });
+ }
+ const input=RawImage.fromCanvas(view);
+ say('AI анализирует фотографию и восстанавливает детали…');
+ const output=await aiEnhancer(input);
+ const rgba=output.rgba();
+ const result=document.createElement('canvas');
+ result.width=rgba.width;result.height=rgba.height;
+ const outCtx=result.getContext('2d');
+ const pixels=new Uint8ClampedArray(rgba.data);
+ outCtx.putImageData(new ImageData(pixels,rgba.width,rgba.height),0,0);
+ current=result;
+ show();
+ say('AI-улучшение завершено: детали восстановлены моделью, разрешение увеличено в 2 раза. Сохраните результат, чтобы скачать фото.');
+}
+$('apply').onclick=async()=>{if(!current){say('Сначала загрузите изображение.');return} $('apply').disabled=true;try{if(tool==='bg')await removeBackground();else if(tool==='erase')await eraseObject();else enhance()}catch(e){console.error('Photo Studio operation failed:',e);let detail='';if(e instanceof Error){detail=e.message||e.name||'';if(e.stack)console.error(e.stack)}else if(typeof e==='string'){detail=e}else if(e&&typeof e==='object'){detail=e.message||e.reason||e.error||e.statusText||JSON.stringify(e)}else{detail=String(e)}say('Ошибка: '+(detail&&detail!=='{}'?' '+detail:'Не удалось выполнить операцию. Откройте консоль браузера для подробностей.'))}finally{$('apply').disabled=false}};
 $('save').onclick=()=>{if(!current)return;const a=document.createElement('a');a.href=current.toDataURL('image/png');a.download='DocuDesk-PhotoStudio.png';a.click();say('Результат сохранён в PNG.')};
 </script></body></html>
