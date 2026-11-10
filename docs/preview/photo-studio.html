@@ -43,7 +43,7 @@ $('file').onchange=e=>loadImage(e.target.files[0]);
 tabs.forEach(b=>b.onclick=()=>{tool=b.dataset.tool;tabs.forEach(x=>x.classList.toggle('active',x===b));$('toolTitle').textContent=b.textContent;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';renderControls();updateActionLabel();say('Режим: '+b.textContent);if(tool==='enhance'&&current){say('Автоматически анализируем загруженное фото…');setTimeout(()=>$('apply').click(),80)}});
 function renderControls(){const c=$('controls');if(tool==='bg'){c.innerHTML='<p class="hint">AI автоматически выделит главный объект и удалит фон.</p><div class="control"><label>Фон результата</label><select id="bgMode"><option value="transparent">Прозрачный</option><option value="white">Белый</option><option value="custom">Свой цвет</option></select></div><div class="control" id="colorWrap" hidden><label>Цвет фона</label><input type="color" id="bgColor" value="#ffffff"></div>';const s=$('bgMode');s.onchange=()=>{$('colorWrap').hidden=s.value!=='custom'};}
 else if(tool==='erase'){c.innerHTML='<p class="hint">Закрасьте ненужный объект кистью. Чем точнее выделение, тем аккуратнее восстановление фона.</p><div class="control"><label>Размер кисти <span id="brushVal">28 px</span></label><input id="brush" type="range" min="5" max="120" value="28"></div><p class="hint">ЛКМ — отметить объект. Нажмите «Применить» для удаления выделенной области.</p><button id="clearMask" class="secondary">Очистить выделение</button>'; $('brush').oninput=e=>{brush=+e.target.value;$('brushVal').textContent=brush+' px'};$('clearMask').onclick=()=>{pctx.clearRect(0,0,paint.width,paint.height);mask=null};}
-else{c.innerHTML='<p class="hint">Автоматическое AI-улучшение фотографии. Модель сама восстановит детали и увеличит разрешение примерно в 2 раза. Никаких ручных настроек.</p><div class="control"><div class="hint">При первом запуске браузер загрузит AI-модель (около 40–50 МБ). Далее она будет использоваться из кэша. Фотография обрабатывается прямо на устройстве и не отправляется на сервер.</div></div>';}}
+else{c.innerHTML='<p class="hint">Автоматическое улучшение фотографии: анализ яркости, контраста и насыщенности с подбором коррекции под конкретный снимок. Никаких ручных настроек.</p><div class="control"><div class="hint">Обработка выполняется прямо в браузере без загрузки тяжёлых AI-моделей и без отправки фотографии на сервер.</div></div>';}}
 renderControls();
 function updateActionLabel(){ $('apply').textContent=tool==='bg'?'Удалить фон':tool==='erase'?'Удалить объект':'Улучшить фото'; }
 updateActionLabel();
@@ -104,34 +104,47 @@ async function eraseObject(){
   [src,rgb,maskRgba,gray,binary,dst,rgba].forEach(m=>{if(m&&!m.isDeleted())m.delete()});
  }
 }
-let aiEnhancer=null;
 async function enhance(){
- say('Подготавливаем AI-модель улучшения фотографии…');
- const {pipeline,RawImage,env}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
- env.allowLocalModels=false;
- env.useBrowserCache=true;
- if(!aiEnhancer){
-  say('Загружаем AI-модель (первый запуск может занять некоторое время)…');
-  aiEnhancer=await pipeline('image-to-image','Xenova/swin2SR-lightweight-x2-64',{
-   dtype:'q8',
-   progress_callback:p=>{
-    if(p.status==='progress' && p.file) say('Загрузка AI-модели: '+p.file+(Number.isFinite(p.progress)?' — '+Math.round(p.progress)+'%':''));
-    else if(p.status==='done') say('AI-модель загружена. Подготавливаем фотографию…');
-   }
-  });
+ say('Анализируем освещение, контраст и цвета фотографии…');
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ // Ограничиваем размер рабочей копии, чтобы не переполнять память мобильного браузера.
+ const maxSide=2048;
+ const scale=Math.min(1,maxSide/Math.max(current.width,current.height));
+ const w=Math.max(1,Math.round(current.width*scale));
+ const h=Math.max(1,Math.round(current.height*scale));
+ const analysis=document.createElement('canvas');
+ analysis.width=Math.min(160, w);
+ analysis.height=Math.max(1,Math.round(h*analysis.width/w));
+ const aCtx=analysis.getContext('2d',{willReadFrequently:true});
+ aCtx.drawImage(current,0,0,analysis.width,analysis.height);
+ const pixels=aCtx.getImageData(0,0,analysis.width,analysis.height).data;
+ let sum=0,sumSq=0,satSum=0,count=0;
+ for(let i=0;i<pixels.length;i+=4){
+  const rr=pixels[i]/255,gg=pixels[i+1]/255,bb=pixels[i+2]/255;
+  const y=.2126*rr+.7152*gg+.0722*bb;
+  sum+=y;sumSq+=y*y;
+  const hi=Math.max(rr,gg,bb),lo=Math.min(rr,gg,bb);
+  satSum+=hi===0?0:(hi-lo)/hi;
+  count++;
  }
- const input=RawImage.fromCanvas(view);
- say('AI анализирует фотографию и восстанавливает детали…');
- const output=await aiEnhancer(input);
- const rgba=output.rgba();
+ const mean=sum/count;
+ const deviation=Math.sqrt(Math.max(0,sumSq/count-mean*mean));
+ const avgSat=satSum/count;
+ // Gentle adaptive corrections: avoid blowing out already bright or high-contrast photos.
+ const brightness=Math.max(.94,Math.min(1.07,1+(0.48-mean)*.16));
+ const contrast=Math.max(1.02,Math.min(1.12,1.12-deviation*.16));
+ const saturation=Math.max(1.03,Math.min(1.12,1.12-avgSat*.08));
+ say('Подбираем коррекцию под освещение снимка…');
+ await new Promise(resolve=>requestAnimationFrame(resolve));
  const result=document.createElement('canvas');
- result.width=rgba.width;result.height=rgba.height;
- const outCtx=result.getContext('2d');
- const pixels=new Uint8ClampedArray(rgba.data);
- outCtx.putImageData(new ImageData(pixels,rgba.width,rgba.height),0,0);
+ result.width=w;result.height=h;
+ const out=result.getContext('2d');
+ out.filter='brightness('+brightness.toFixed(3)+') contrast('+contrast.toFixed(3)+') saturate('+saturation.toFixed(3)+')';
+ out.drawImage(current,0,0,w,h);
+ out.filter='none';
  current=result;
  show();
- say('AI-улучшение завершено: детали восстановлены моделью, разрешение увеличено в 2 раза. Сохраните результат, чтобы скачать фото.');
+ say('Готово: автоматически скорректированы яркость, контраст и насыщенность. Результат уже показан — можно сохранить его.');
 }
 $('apply').onclick=async()=>{if(!current){say('Сначала загрузите изображение.');return} $('apply').disabled=true;try{if(tool==='bg')await removeBackground();else if(tool==='erase')await eraseObject();else await enhance()}catch(e){console.error('Photo Studio operation failed:',e);let detail='';if(e instanceof Error){detail=e.message||e.name||'';if(e.stack)console.error(e.stack)}else if(typeof e==='string'){detail=e}else if(e&&typeof e==='object'){detail=e.message||e.reason||e.error||e.statusText||JSON.stringify(e)}else{detail=String(e)}say('Ошибка: '+(detail&&detail!=='{}'?' '+detail:'Не удалось выполнить операцию. Откройте консоль браузера для подробностей.'))}finally{$('apply').disabled=false}};
 $('save').onclick=()=>{if(!current)return;const a=document.createElement('a');a.href=current.toDataURL('image/png');a.download='DocuDesk-PhotoStudio.png';a.click();say('Результат сохранён в PNG.')};
