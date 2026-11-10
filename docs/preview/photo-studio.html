@@ -17,7 +17,7 @@ input[type=file]{display:none}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:1
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.stage{min-height:390px;background:#edf0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;overflow:auto;padding:12px;position:relative}
 #view{max-width:100%;max-height:68vh;object-fit:contain;box-shadow:0 5px 20px #0002;background:white}
 .canvas-wrap{position:relative;display:inline-block;max-width:100%;max-height:68vh;line-height:0;box-shadow:0 5px 20px #0002;background:white}.canvas-wrap #view{display:block;max-width:100%;max-height:68vh;object-fit:contain;box-shadow:none}.canvas-wrap #paint{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none}
-.empty{color:var(--muted);text-align:center;padding:50px 10px}.side h3{font-size:15px;margin:0 0 14px}.control{margin:14px 0}.control label{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:7px}.control input{width:100%}.hint{font-size:12px;color:var(--muted);line-height:1.5}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.status{font-size:13px;color:var(--muted);min-height:20px;margin-top:12px;white-space:pre-wrap}.result{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.empty{color:var(--muted);text-align:center;padding:50px 10px}.side h3{font-size:15px;margin:0 0 14px}.control{margin:14px 0}.control label{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:7px}.control input{width:100%}.hint{font-size:12px;color:var(--muted);line-height:1.5}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.status{font-size:13px;color:#344054;min-height:44px;margin-top:12px;padding:12px 14px;border:1px solid #dbe3ef;border-radius:10px;background:#f8fafc;white-space:pre-wrap;line-height:1.5;overflow-wrap:anywhere}.status:empty{display:none}.status.error{color:#991b1b;background:#fef2f2;border-color:#fecaca}.status.success{color:#166534;background:#f0fdf4;border-color:#bbf7d0}.status.progress{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}.result{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:800px){body{padding:18px 12px}.layout{grid-template-columns:1fr}.stage{min-height:280px}.side{order:-1}h1{font-size:25px}}
 </style>
 </head>
@@ -35,7 +35,7 @@ input[type=file]{display:none}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:1
 const $=id=>document.getElementById(id), view=$('view'),paint=$('paint'),ctx=view.getContext('2d'),pctx=paint.getContext('2d');
 let original=null,current=null,tool='bg',mask=null,painting=false,brush=28,modified=false;
 const tabs=[...document.querySelectorAll('.tab')];
-function say(s){$('status').textContent=s}
+function say(s,kind='progress'){$('status').textContent=s;$('status').className='status '+kind;$('status').setAttribute('aria-live',kind==='error'?'assertive':'polite')}
 function sizeCanvases(w,h){view.width=w;view.height=h;paint.width=w;paint.height=h;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';}
 function show(){if(!current)return;sizeCanvases(current.width,current.height);ctx.clearRect(0,0,view.width,view.height);ctx.drawImage(current,0,0);$('canvasWrap').hidden=false;$('empty').hidden=true;$('save').disabled=false;modified=true;}
 function loadImage(file){if(!file||!file.type.startsWith('image/'))return;const url=URL.createObjectURL(file),im=new Image();im.onload=()=>{const scale=Math.min(1,3000/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);original=c;current=c;mask=null;show();say('Изображение загружено: '+c.width+' × '+c.height);URL.revokeObjectURL(url);if(tool==='enhance'){say('Фото загружено. Автоматически анализируем и улучшаем…');setTimeout(()=>$('apply').click(),80)}};im.onerror=()=>say('Не удалось открыть изображение');im.src=url;}
@@ -51,7 +51,7 @@ function pointer(e){const r=paint.getBoundingClientRect();return{x:(e.clientX-r.
 function stroke(e){const q=pointer(e);pctx.fillStyle='rgba(239,68,68,.42)';pctx.beginPath();pctx.arc(q.x,q.y,brush/2,0,Math.PI*2);pctx.fill();if(!mask){mask=document.createElement('canvas');mask.width=paint.width;mask.height=paint.height;}const m=mask.getContext('2d');m.fillStyle='white';m.beginPath();m.arc(q.x,q.y,brush/2,0,Math.PI*2);m.fill();}
 paint.addEventListener('pointerdown',e=>{if(tool!=='erase'||!current)return;painting=true;paint.setPointerCapture(e.pointerId);stroke(e)});paint.addEventListener('pointermove',e=>{if(painting)stroke(e)});paint.addEventListener('pointerup',()=>painting=false);paint.addEventListener('pointercancel',()=>painting=false);
 $('reset').onclick=()=>{if(!original)return;current=original;mask=null;pctx.clearRect(0,0,paint.width,paint.height);show();say('Изменения сброшены.')};
-async function removeBackground(){say('Загружаем AI-модель удаления фона…');const {removeBackground}=await import('https://esm.sh/@imgly/background-removal@1.5.5');const blob=await new Promise(r=>current.toBlob(r,'image/png'));const result=await removeBackground(blob,{progress:(key,cur,total)=>say('Загрузка модели: '+key+' '+Math.round(cur/total*100)+'%')});let out=await createImageBitmap(result);const c=document.createElement('canvas');c.width=out.width;c.height=out.height;const x=c.getContext('2d');x.drawImage(out,0,0);const mode=$('bgMode').value;if(mode!=='transparent'){x.globalCompositeOperation='destination-over';x.fillStyle=mode==='white'?'#fff':$('bgColor').value;x.fillRect(0,0,c.width,c.height)}current=c;show();say('Фон удалён. Проверьте края объекта и сохраните результат.');}
+async function removeBackground(){say('Загружаем AI-модель удаления фона…');const {removeBackground}=await import('https://esm.sh/@imgly/background-removal@1.5.5');const blob=await new Promise(r=>current.toBlob(r,'image/png'));const result=await removeBackground(blob,{progress:(key,cur,total)=>say('Загрузка модели: '+key+' '+Math.round(cur/total*100)+'%')});let out=await createImageBitmap(result);const c=document.createElement('canvas');c.width=out.width;c.height=out.height;const x=c.getContext('2d');x.drawImage(out,0,0);const mode=$('bgMode').value;if(mode!=='transparent'){x.globalCompositeOperation='destination-over';x.fillStyle=mode==='white'?'#fff':$('bgColor').value;x.fillRect(0,0,c.width,c.height)}current=c;show();say('Фон удалён. Проверьте края объекта и сохраните результат.','success');}
 async function eraseObject(){
  if(!mask) throw new Error('Сначала закрасьте объект кистью.');
  say('Загружаем OpenCV для удаления объекта…');
@@ -99,7 +99,7 @@ async function eraseObject(){
   mask=null;
   pctx.clearRect(0,0,paint.width,paint.height);
   show();
-  say('Объект удалён. На сложном фоне могут оставаться следы — попробуйте выделить область чуть шире.');
+  say('Объект удалён текущим методом восстановления по соседним пикселям. Генеративная дорисовка будет отдельным следующим этапом.','success');
  }finally{
   [src,rgb,maskRgba,gray,binary,dst,rgba].forEach(m=>{if(m&&!m.isDeleted())m.delete()});
  }
@@ -144,8 +144,8 @@ async function enhance(){
  out.filter='none';
  current=result;
  show();
- say('Готово: автоматически скорректированы яркость, контраст и насыщенность. Результат уже показан — можно сохранить его.');
+ say('Готово: автоматически скорректированы яркость, контраст и насыщенность. Результат уже показан — можно сохранить его.','success');
 }
-$('apply').onclick=async()=>{if(!current){say('Сначала загрузите изображение.');return} $('apply').disabled=true;try{if(tool==='bg')await removeBackground();else if(tool==='erase')await eraseObject();else await enhance()}catch(e){console.error('Photo Studio operation failed:',e);let detail='';if(e instanceof Error){detail=e.message||e.name||'';if(e.stack)console.error(e.stack)}else if(typeof e==='string'){detail=e}else if(e&&typeof e==='object'){detail=e.message||e.reason||e.error||e.statusText||JSON.stringify(e)}else{detail=String(e)}say('Ошибка: '+(detail&&detail!=='{}'?' '+detail:'Не удалось выполнить операцию. Откройте консоль браузера для подробностей.'))}finally{$('apply').disabled=false}};
+$('apply').onclick=async()=>{if(!current){say('Сначала загрузите изображение.');return} $('apply').disabled=true;try{if(tool==='bg')await removeBackground();else if(tool==='erase')await eraseObject();else await enhance()}catch(e){console.error('Photo Studio operation failed:',e);let detail='';if(e instanceof Error){detail=e.message||e.name||'';if(e.stack)console.error(e.stack)}else if(typeof e==='string'){detail=e}else if(e&&typeof e==='object'){detail=e.message||e.reason||e.error||e.statusText||JSON.stringify(e)}else{detail=String(e)}say('Операция не выполнена. Причина: '+(detail&&detail!=='{}'?detail:'Не удалось определить причину. Откройте консоль браузера для подробностей.'),'error')}finally{$('apply').disabled=false}};
 $('save').onclick=()=>{if(!current)return;const a=document.createElement('a');a.href=current.toDataURL('image/png');a.download='DocuDesk-PhotoStudio.png';a.click();say('Результат сохранён в PNG.')};
 </script></body></html>
