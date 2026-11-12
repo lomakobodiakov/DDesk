@@ -83,7 +83,7 @@ function selectSegmentAt(x,y){
 }
 async function loadAutoSelection(){
  if(!current)return;
- $('autoSelect').disabled=true;autoMode=true;autoSegments=[];mask=null;selectedSegment=-1;pctx.clearRect(0,0,paint.width,paint.height);$('objectList').innerHTML='';
+ autoMode=true;autoSegments=[];mask=null;selectedSegment=-1;pctx.clearRect(0,0,paint.width,paint.height);
  try{
   say('Загружаем модель распознавания предметов. При первом запуске это может занять некоторое время…');
   if(!segmenterPromise){segmenterPromise=(async()=>{const {pipeline}=await import('https://esm.sh/@huggingface/transformers@3.7.2');return await pipeline('image-segmentation','Xenova/detr-resnet-50-panoptic',{dtype:'q8'});})();}
@@ -97,7 +97,7 @@ async function loadAutoSelection(){
   if(!autoSegments.length)throw new Error('Модель не обнаружила отдельные предметы на этой фотографии.');
   $('eraseHint').textContent='Найдено областей: '+autoSegments.length+'. Теперь кликните по предмету, который хотите удалить.';
   say('Анализ завершён. Найдено областей: '+autoSegments.length+'. Кликните по нужному предмету на фото.','success');
- }catch(e){segmenterPromise=null;autoMode=false;throw e}finally{$('autoSelect').disabled=false}
+ }catch(e){segmenterPromise=null;autoMode=false;throw e}finally{}
 }
 async function removeBackground(){say('Загружаем AI-модель удаления фона…');const {removeBackground}=await import('https://esm.sh/@imgly/background-removal@1.5.5');const blob=await new Promise(r=>current.toBlob(r,'image/png'));const result=await removeBackground(blob,{progress:(key,cur,total)=>say('Загрузка модели: '+key+' '+Math.round(cur/total*100)+'%')});let out=await createImageBitmap(result);const c=document.createElement('canvas');c.width=out.width;c.height=out.height;const x=c.getContext('2d');x.drawImage(out,0,0);const mode=$('bgMode').value;if(mode!=='transparent'){x.globalCompositeOperation='destination-over';x.fillStyle=mode==='white'?'#fff':$('bgColor').value;x.fillRect(0,0,c.width,c.height)}current=c;show();say('Фон удалён. Проверьте края объекта и сохраните результат.','success');}
 async function eraseObject(){
