@@ -17,7 +17,7 @@ input[type=file]{display:none}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:1
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.stage{min-height:390px;background:#edf0f5;border-radius:14px;display:flex;align-items:center;justify-content:center;overflow:auto;padding:12px;position:relative}
 #view{max-width:100%;max-height:68vh;object-fit:contain;box-shadow:0 5px 20px #0002;background:white}
 .canvas-wrap{position:relative;display:inline-block;max-width:100%;max-height:68vh;line-height:0;box-shadow:0 5px 20px #0002;background:white}.canvas-wrap #view{display:block;max-width:100%;max-height:68vh;object-fit:contain;box-shadow:none}.canvas-wrap #paint{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none}
-.empty{color:var(--muted);text-align:center;padding:50px 10px}.side h3{font-size:15px;margin:0 0 14px}.control{margin:14px 0}.control label{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:7px}.control input{width:100%}.hint{font-size:12px;color:var(--muted);line-height:1.5}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.status{font-size:13px;color:#344054;min-height:44px;margin-top:12px;padding:12px 14px;border:1px solid #dbe3ef;border-radius:10px;background:#f8fafc;white-space:pre-wrap;line-height:1.5;overflow-wrap:anywhere}.status:empty{display:none}.status.error{color:#991b1b;background:#fef2f2;border-color:#fecaca}.status.success{color:#166534;background:#f0fdf4;border-color:#bbf7d0}.status.progress{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}.result{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.empty{color:var(--muted);text-align:center;padding:50px 10px}.side h3{font-size:15px;margin:0 0 14px}.control{margin:14px 0}.control label{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:7px}.control input{width:100%}.hint{font-size:12px;color:var(--muted);line-height:1.5}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.status{font-size:13px;color:#344054;min-height:44px;margin-top:12px;padding:12px 14px;border:1px solid #dbe3ef;border-radius:10px;background:#f8fafc;white-space:pre-wrap;line-height:1.5;overflow-wrap:anywhere}.status:empty{display:none}.status.error{color:#991b1b;background:#fef2f2;border-color:#fecaca}.status.success{color:#166534;background:#f0fdf4;border-color:#bbf7d0}.status.progress{color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe}.result{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.object-list{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.object-chip{background:#eef2f7;color:#263348;border:1px solid #d8e0ec;padding:7px 10px;font-size:12px}.object-chip.selected{background:#dbeafe;color:#1d4ed8;border-color:#60a5fa}.object-tools{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
 @media(max-width:800px){body{padding:18px 12px}.layout{grid-template-columns:1fr}.stage{min-height:280px}.side{order:-1}h1{font-size:25px}}
 </style>
 </head>
@@ -29,11 +29,11 @@ input[type=file]{display:none}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:1
 <div class="tabs"><button class="tab active" data-tool="bg">Удаление фона</button><button class="tab" data-tool="erase">Удаление объектов</button><button class="tab" data-tool="enhance">Улучшение качества</button></div>
 <div class="layout"><div><div class="stage" id="stage"><div class="empty" id="empty">Загрузите фото, чтобы начать работу</div><div class="canvas-wrap" id="canvasWrap" hidden><canvas id="view"></canvas><canvas id="paint"></canvas></div></div><div class="actions"><button id="apply">Применить</button><button id="reset" class="secondary">Сбросить изменения</button><button id="save" class="secondary" disabled>Сохранить результат</button></div><div class="status" id="status" role="status"></div></div>
 <aside class="card side"><h3 id="toolTitle">Удаление фона</h3><div id="controls"><p class="hint">Автоматически отделить объект от фона и получить изображение с прозрачностью.</p><div class="control"><label>Фон результата</label><select id="bgMode"><option value="transparent">Прозрачный</option><option value="white">Белый</option><option value="custom">Свой цвет</option></select></div><div class="control" id="colorWrap" hidden><label>Цвет фона</label><input type="color" id="bgColor" value="#ffffff"></div></div></aside></div></section>
-<p class="hint" style="margin-top:16px">Важно: удаление фона использует AI-модель и может потребовать загрузки нескольких десятков мегабайт. Удаление объектов в этой тестовой версии использует восстановление области по соседним пикселям (inpainting), а не генеративную дорисовку. Увеличение разрешения пока интерполяционное, не AI-суперразрешение.</p>
+<p class="hint" style="margin-top:16px">Важно: удаление фона использует AI-модель и может потребовать загрузки нескольких десятков мегабайт. Автовыделение предметов использует локальную AI-модель сегментации; удаление выделенной области пока восстанавливает фон по соседним пикселям (inpainting), а не генеративную дорисовку. Увеличение разрешения пока интерполяционное, не AI-суперразрешение.</p>
 </main>
 <script>
 const $=id=>document.getElementById(id), view=$('view'),paint=$('paint'),ctx=view.getContext('2d'),pctx=paint.getContext('2d');
-let original=null,current=null,tool='bg',mask=null,painting=false,brush=28,modified=false;
+let original=null,current=null,tool='bg',mask=null,painting=false,brush=28,modified=false,autoSegments=[],autoMode=false,selectedSegment=-1,segmenterPromise=null;
 const tabs=[...document.querySelectorAll('.tab')];
 function say(s,kind='progress'){$('status').textContent=s;$('status').className='status '+kind;$('status').setAttribute('aria-live',kind==='error'?'assertive':'polite')}
 function sizeCanvases(w,h){view.width=w;view.height=h;paint.width=w;paint.height=h;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';}
@@ -42,15 +42,63 @@ function loadImage(file){if(!file||!file.type.startsWith('image/'))return;const 
 $('file').onchange=e=>loadImage(e.target.files[0]);
 tabs.forEach(b=>b.onclick=()=>{tool=b.dataset.tool;tabs.forEach(x=>x.classList.toggle('active',x===b));$('toolTitle').textContent=b.textContent;paint.style.pointerEvents=tool==='erase'?'auto':'none';paint.style.cursor='crosshair';renderControls();updateActionLabel();say('Режим: '+b.textContent);if(tool==='enhance'&&current){say('Автоматически анализируем загруженное фото…');setTimeout(()=>$('apply').click(),80)}});
 function renderControls(){const c=$('controls');if(tool==='bg'){c.innerHTML='<p class="hint">AI автоматически выделит главный объект и удалит фон.</p><div class="control"><label>Фон результата</label><select id="bgMode"><option value="transparent">Прозрачный</option><option value="white">Белый</option><option value="custom">Свой цвет</option></select></div><div class="control" id="colorWrap" hidden><label>Цвет фона</label><input type="color" id="bgColor" value="#ffffff"></div>';const s=$('bgMode');s.onchange=()=>{$('colorWrap').hidden=s.value!=='custom'};}
-else if(tool==='erase'){c.innerHTML='<p class="hint">Закрасьте ненужный объект кистью. Чем точнее выделение, тем аккуратнее восстановление фона.</p><div class="control"><label>Размер кисти <span id="brushVal">28 px</span></label><input id="brush" type="range" min="5" max="120" value="28"></div><p class="hint">ЛКМ — отметить объект. Нажмите «Применить» для удаления выделенной области.</p><button id="clearMask" class="secondary">Очистить выделение</button>'; $('brush').oninput=e=>{brush=+e.target.value;$('brushVal').textContent=brush+' px'};$('clearMask').onclick=()=>{pctx.clearRect(0,0,paint.width,paint.height);mask=null};}
+else if(tool==='erase'){c.innerHTML='<p class="hint">Автоматически найдите предметы на фото, затем нажмите на нужный предмет прямо на изображении или выберите его в списке. Если модель не найдёт объект, можно выделить его кистью.</p><div class="object-tools"><button id="autoSelect">Автовыделение предметов</button><button id="manualSelect" class="secondary">Кисть вручную</button></div><div id="objectList" class="object-list"></div><div class="control"><label>Размер кисти <span id="brushVal">28 px</span></label><input id="brush" type="range" min="5" max="120" value="28"></div><p class="hint" id="eraseHint">Нажмите «Автовыделение предметов». После анализа кликните по предмету на фото. Затем нажмите «Удалить объект».</p><button id="clearMask" class="secondary">Очистить выделение</button>'; $('brush').oninput=e=>{brush=+e.target.value;$('brushVal').textContent=brush+' px'};$('autoSelect').onclick=loadAutoSelection;$('manualSelect').onclick=()=>{autoMode=false;autoSegments=[];selectedSegment=-1;mask=null;pctx.clearRect(0,0,paint.width,paint.height);$('objectList').innerHTML='';$('eraseHint').textContent='Кистью закрасьте объект, который нужно удалить.';say('Ручное выделение кистью включено.')};$('clearMask').onclick=()=>{pctx.clearRect(0,0,paint.width,paint.height);mask=null;selectedSegment=-1;[...$('objectList').children].forEach(x=>x.classList.remove('selected'));say('Выделение очищено.')};}
 else{c.innerHTML='<p class="hint">Автоматическое улучшение фотографии: анализ яркости, контраста и насыщенности с подбором коррекции под конкретный снимок. Никаких ручных настроек.</p><div class="control"><div class="hint">Обработка выполняется прямо в браузере без загрузки тяжёлых AI-моделей и без отправки фотографии на сервер.</div></div>';}}
 renderControls();
 function updateActionLabel(){ $('apply').textContent=tool==='bg'?'Удалить фон':tool==='erase'?'Удалить объект':'Улучшить фото'; }
 updateActionLabel();
 function pointer(e){const r=paint.getBoundingClientRect();return{x:(e.clientX-r.left)*paint.width/r.width,y:(e.clientY-r.top)*paint.height/r.height}}
 function stroke(e){const q=pointer(e);pctx.fillStyle='rgba(239,68,68,.42)';pctx.beginPath();pctx.arc(q.x,q.y,brush/2,0,Math.PI*2);pctx.fill();if(!mask){mask=document.createElement('canvas');mask.width=paint.width;mask.height=paint.height;}const m=mask.getContext('2d');m.fillStyle='white';m.beginPath();m.arc(q.x,q.y,brush/2,0,Math.PI*2);m.fill();}
-paint.addEventListener('pointerdown',e=>{if(tool!=='erase'||!current)return;painting=true;paint.setPointerCapture(e.pointerId);stroke(e)});paint.addEventListener('pointermove',e=>{if(painting)stroke(e)});paint.addEventListener('pointerup',()=>painting=false);paint.addEventListener('pointercancel',()=>painting=false);
+paint.addEventListener('pointerdown',e=>{if(tool!=='erase'||!current)return;if(autoMode&&autoSegments.length){const q=pointer(e);selectSegmentAt(q.x,q.y);return}painting=true;paint.setPointerCapture(e.pointerId);stroke(e)});paint.addEventListener('pointermove',e=>{if(painting)stroke(e)});paint.addEventListener('pointerup',()=>painting=false);paint.addEventListener('pointercancel',()=>painting=false);
 $('reset').onclick=()=>{if(!original)return;current=original;mask=null;pctx.clearRect(0,0,paint.width,paint.height);show();say('Изменения сброшены.')};
+function segmentMaskCanvas(raw){
+ const w=raw.width,h=raw.height,channels=raw.channels||1,data=raw.data;
+ const out=document.createElement('canvas');out.width=view.width;out.height=view.height;
+ const src=document.createElement('canvas');src.width=w;src.height=h;
+ const sctx=src.getContext('2d'),image=sctx.createImageData(w,h),binary=new Uint8ClampedArray(w*h);
+ for(let i=0;i<w*h;i++){const v=channels===1?data[i]:Math.max(data[i*channels],data[i*channels+1],data[i*channels+2]);const on=v>127?255:0;binary[i]=on;image.data[i*4]=255;image.data[i*4+1]=255;image.data[i*4+2]=255;image.data[i*4+3]=on;}
+ sctx.putImageData(image,0,0);out.getContext('2d').drawImage(src,0,0,out.width,out.height);
+ const m=document.createElement('canvas');m.width=view.width;m.height=view.height;const mctx=m.getContext('2d');const md=mctx.createImageData(m.width,m.height);
+ for(let y=0;y<m.height;y++)for(let x=0;x<m.width;x++){const sx=Math.min(w-1,Math.floor(x*w/m.width)),sy=Math.min(h-1,Math.floor(y*h/m.height));const on=binary[sy*w+sx];const i=(y*m.width+x)*4;md.data[i]=255;md.data[i+1]=255;md.data[i+2]=255;md.data[i+3]=on;}
+ mctx.putImageData(md,0,0);return m;
+}
+function selectSegment(index){
+ const item=autoSegments[index];if(!item)return;
+ selectedSegment=index;mask=item.maskCanvas;autoMode=true;
+ pctx.clearRect(0,0,paint.width,paint.height);
+ const data=mask.getContext('2d').getImageData(0,0,mask.width,mask.height).data;
+ const overlay=pctx.createImageData(paint.width,paint.height);
+ for(let i=0;i<data.length;i+=4){if(data[i+3]>0){overlay.data[i]=239;overlay.data[i+1]=68;overlay.data[i+2]=68;overlay.data[i+3]=105;}}
+ pctx.putImageData(overlay,0,0);
+ [...$('objectList').children].forEach((el,i)=>el.classList.toggle('selected',i===index));
+ $('eraseHint').textContent='Выбран объект: '+item.label+'. Нажмите «Удалить объект», чтобы продолжить.';
+ say('Выделен объект: '+item.label+'. Проверьте подсветку на фотографии.');
+}
+function selectSegmentAt(x,y){
+ const px=Math.max(0,Math.min(mask?.width-1,Math.floor(x))),py=Math.max(0,Math.min(mask?.height-1,Math.floor(y)));
+ for(let i=autoSegments.length-1;i>=0;i--){const m=autoSegments[i].maskCanvas.getContext('2d').getImageData(px,py,1,1).data;if(m[3]>0){selectSegment(i);return}}
+ say('В этой точке предмет не найден. Нажмите прямо по подсвеченному предмету или выберите его в списке.','error');
+}
+async function loadAutoSelection(){
+ if(!current)return;
+ $('autoSelect').disabled=true;autoMode=true;autoSegments=[];mask=null;selectedSegment=-1;pctx.clearRect(0,0,paint.width,paint.height);$('objectList').innerHTML='';
+ try{
+  say('Загружаем модель распознавания предметов. При первом запуске это может занять некоторое время…');
+  if(!segmenterPromise){segmenterPromise=(async()=>{const {pipeline}=await import('https://esm.sh/@huggingface/transformers@3.7.2');return await pipeline('image-segmentation','Xenova/detr-resnet-50-panoptic',{dtype:'q8'});})();}
+  const segmenter=await segmenterPromise;
+  say('Анализируем фотографию и ищем отдельные предметы…');
+  const blob=await new Promise((resolve,reject)=>view.toBlob(b=>b?resolve(b):reject(new Error('Не удалось подготовить изображение для анализа.')),'image/png'));
+  const url=URL.createObjectURL(blob);
+  let results;
+  try{results=await segmenter(url,{threshold:0.45,mask_threshold:0.5})}finally{URL.revokeObjectURL(url)}
+  autoSegments=results.map((item)=>({label:item.label||'Предмет',score:item.score,maskCanvas:segmentMaskCanvas(item.mask)})).filter(item=>item.maskCanvas);
+  if(!autoSegments.length)throw new Error('Модель не обнаружила отдельные предметы на этой фотографии.');
+  const list=$('objectList');
+  autoSegments.forEach((item,index)=>{const b=document.createElement('button');b.className='object-chip';b.textContent=item.label+(Number.isFinite(item.score)?' · '+Math.round(item.score*100)+'%':'');b.onclick=()=>selectSegment(index);list.appendChild(b)});
+  $('eraseHint').textContent='Найдено объектов: '+autoSegments.length+'. Нажмите на нужный предмет на фото или выберите его в списке.';
+  say('Найдено объектов: '+autoSegments.length+'. Теперь нажмите на предмет на фотографии или выберите его в списке.','success');
+ }catch(e){segmenterPromise=null;autoMode=false;throw e}finally{$('autoSelect').disabled=false}
+}
 async function removeBackground(){say('Загружаем AI-модель удаления фона…');const {removeBackground}=await import('https://esm.sh/@imgly/background-removal@1.5.5');const blob=await new Promise(r=>current.toBlob(r,'image/png'));const result=await removeBackground(blob,{progress:(key,cur,total)=>say('Загрузка модели: '+key+' '+Math.round(cur/total*100)+'%')});let out=await createImageBitmap(result);const c=document.createElement('canvas');c.width=out.width;c.height=out.height;const x=c.getContext('2d');x.drawImage(out,0,0);const mode=$('bgMode').value;if(mode!=='transparent'){x.globalCompositeOperation='destination-over';x.fillStyle=mode==='white'?'#fff':$('bgColor').value;x.fillRect(0,0,c.width,c.height)}current=c;show();say('Фон удалён. Проверьте края объекта и сохраните результат.','success');}
 async function eraseObject(){
  if(!mask) throw new Error('Сначала закрасьте объект кистью.');
