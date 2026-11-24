@@ -29,7 +29,8 @@ main.addEventListener('pointerdown',e=>{if(!pdf)return;main.setPointerCapture(e.
 main.addEventListener('pointermove',e=>{if(!drag)return;const p=pos(e);rect={x:Math.min(drag.x,p.x),y:Math.min(drag.y,p.y),w:Math.abs(p.x-drag.x),h:Math.abs(p.y-drag.y)};drawSel()});
 main.addEventListener('pointerup',()=>{drag=null;if(rect&&(rect.w<8||rect.h<8)){rect=null;sel.style.display='none'}update()});
 function drawSel(){const b=main.getBoundingClientRect(),sx=b.width/main.width,sy=b.height/main.height;sel.style.display='block';sel.style.left=rect.x*sx+'px';sel.style.top=rect.y*sy+'px';sel.style.width=rect.w*sx+'px';sel.style.height=rect.h*sy+'px';paintCropPreview()}
-function rawCrop(){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(rect.w));c.height=Math.max(1,Math.round(rect.h));c.getContext('2d').drawImage(main,rect.x,rect.y,rect.w,rect.h,0,0,c.width,c.height);return c}
+function rawCrop(source=main,scale=1){const r={x:rect.x*scale,y:rect.y*scale,w:rect.w*scale,h:rect.h*scale};const c=document.createElement('canvas');c.width=Math.max(1,Math.round(r.w));c.height=Math.max(1,Math.round(r.h));c.getContext('2d').drawImage(source,r.x,r.y,r.w,r.h,0,0,c.width,c.height);return c}
+async function renderPageHighQuality(index){const page=pages[index].page,base=page.getViewport({scale:1}),scale=Math.min(5,Math.sqrt(18000000/(base.width*base.height)));const viewport=page.getViewport({scale});const c=document.createElement('canvas');c.width=Math.ceil(viewport.width);c.height=Math.ceil(viewport.height);await page.render({canvasContext:c.getContext('2d',{alpha:false}),viewport}).promise;return {canvas:c,scale:scale/2.5}}
 function rotateCrop(src,degrees){const rad=degrees*Math.PI/180, w=src.width,h=src.height,nw=Math.ceil(Math.abs(w*Math.cos(rad))+Math.abs(h*Math.sin(rad))),nh=Math.ceil(Math.abs(w*Math.sin(rad))+Math.abs(h*Math.cos(rad))),c=document.createElement('canvas');c.width=nw;c.height=nh;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,nw,nh);g.translate(nw/2,nh/2);g.rotate(rad);g.drawImage(src,-w/2,-h/2);return c}
 function cropCanvas(){return rotateCrop(rawCrop(),angle)}
 function paintCropPreview(){if(!rect){overlay.style.display='none';return}const b=main.getBoundingClientRect(),sx=b.width/main.width,sy=b.height/main.height,src=rawCrop();overlay.width=src.width;overlay.height=src.height;overlayCtx.clearRect(0,0,overlay.width,overlay.height);overlayCtx.fillStyle='#fff';overlayCtx.fillRect(0,0,overlay.width,overlay.height);overlayCtx.drawImage(src,0,0);overlay.style.left=(rect.x*sx)+'px';overlay.style.top=(rect.y*sy)+'px';overlay.style.width=(rect.w*sx)+'px';overlay.style.height=(rect.h*sy)+'px';overlay.style.transform='rotate('+angle+'deg)';overlay.style.display='block'}
@@ -41,39 +42,39 @@ function orderQuad(points){
  return [tl,tr,br,bl];
 }
 function drawDetectedQuad(){detectOverlay.width=main.width;detectOverlay.height=main.height;detectCtx.clearRect(0,0,detectOverlay.width,detectOverlay.height);if(!detectedQuad){detectOverlay.style.display='none';return}detectOverlay.style.display='block';detectCtx.lineWidth=Math.max(3,main.width/350);detectCtx.strokeStyle='#0877ef';detectCtx.fillStyle='rgba(8,119,239,.12)';detectCtx.beginPath();detectedQuad.forEach((p,i)=>i?detectCtx.lineTo(p.x,p.y):detectCtx.moveTo(p.x,p.y));detectCtx.closePath();detectCtx.fill();detectCtx.stroke();detectedQuad.forEach((p,i)=>{detectCtx.beginPath();detectCtx.arc(p.x,p.y,Math.max(9,main.width/100),0,Math.PI*2);detectCtx.fillStyle='#fff';detectCtx.fill();detectCtx.lineWidth=3;detectCtx.strokeStyle='#0877ef';detectCtx.stroke();detectCtx.fillStyle='#0756b5';detectCtx.font='bold 15px sans-serif';detectCtx.fillText(String(i+1),p.x+11,p.y-10)})}
-function warpDetected(){if(!detectedQuad||!window.cvReady)return null;const q=detectedQuad,dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),w=Math.max(2,Math.round((dist(q[0],q[1])+dist(q[3],q[2]))/2)),h=Math.max(2,Math.round((dist(q[0],q[3])+dist(q[1],q[2]))/2));let src=cv.imread(main),dst=new cv.Mat(),srcPts=cv.matFromArray(4,1,cv.CV_32FC2,[q[0].x,q[0].y,q[1].x,q[1].y,q[2].x,q[2].y,q[3].x,q[3].y]),dstPts=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,w-1,0,w-1,h-1,0,h-1]),M=cv.getPerspectiveTransform(srcPts,dstPts);cv.warpPerspective(src,dst,M,new cv.Size(w,h),cv.INTER_CUBIC,cv.BORDER_CONSTANT,new cv.Scalar(255,255,255,255));const out=document.createElement('canvas');out.width=w;out.height=h;cv.imshow(out,dst);src.delete();dst.delete();srcPts.delete();dstPts.delete();M.delete();return out}
+function warpDetected(sourceCanvas,scale){if(!detectedQuad||!window.cvReady)return null;const q=detectedQuad.map(p=>({x:p.x*scale,y:p.y*scale})),dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),w=Math.max(2,Math.round((dist(q[0],q[1])+dist(q[3],q[2]))/2)),h=Math.max(2,Math.round((dist(q[0],q[3])+dist(q[1],q[2]))/2));let src=cv.imread(sourceCanvas),dst=new cv.Mat(),srcPts=cv.matFromArray(4,1,cv.CV_32FC2,[q[0].x,q[0].y,q[1].x,q[1].y,q[2].x,q[2].y,q[3].x,q[3].y]),dstPts=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,w-1,0,w-1,h-1,0,h-1]),M=cv.getPerspectiveTransform(srcPts,dstPts);cv.warpPerspective(src,dst,M,new cv.Size(w,h),cv.INTER_LANCZOS4,cv.BORDER_REPLICATE);const out=document.createElement('canvas');out.width=w;out.height=h;cv.imshow(out,dst);src.delete();dst.delete();srcPts.delete();dstPts.delete();M.delete();return out}
 $('autoDetect').onclick=async()=>{
  try{
   say('Загружаю модуль распознавания…');await ensureOpenCV();
   say('Ищу паспорт, ID-карту или другой документ…');
-  const maxSide=1600,detectScale=Math.min(1,maxSide/Math.max(main.width,main.height));
+  const maxSide=2400,detectScale=Math.min(1,maxSide/Math.max(main.width,main.height));
   const work=document.createElement('canvas');work.width=Math.max(1,Math.round(main.width*detectScale));work.height=Math.max(1,Math.round(main.height*detectScale));
   const wg=work.getContext('2d');wg.drawImage(main,0,0,work.width,work.height);
-  let src=cv.imread(work),gray=new cv.Mat(),blur=new cv.Mat(),edges=new cv.Mat(),adaptive=new cv.Mat(),kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));
-  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
-  cv.Canny(blur,edges,25,100);cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,kernel);
-  cv.adaptiveThreshold(blur,adaptive,255,cv.ADAPTIVE_THRESH_GAUSSIAN_C,cv.THRESH_BINARY_INV,31,12);
+  let src=cv.imread(work),gray=new cv.Mat(),blur=new cv.Mat(),edges=new cv.Mat(),adaptive=new cv.Mat(),kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(9,9));
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,blur,new cv.Size(3,3),0);
+  cv.Canny(blur,edges,18,75);cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,kernel);
+  cv.adaptiveThreshold(blur,adaptive,255,cv.ADAPTIVE_THRESH_GAUSSIAN_C,cv.THRESH_BINARY_INV,31,8);
   cv.morphologyEx(adaptive,adaptive,cv.MORPH_CLOSE,kernel);
   const candidates=[edges,adaptive];let best=null,bestScore=0;
   for(const source of candidates){
    const contourInput=source.clone(),contours=new cv.MatVector(),hierarchy=new cv.Mat();
    cv.findContours(contourInput,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
    for(let i=0;i<contours.size();i++){
-    const cnt=contours.get(i),peri=cv.arcLength(cnt,true),approx=new cv.Mat();
-    cv.approxPolyDP(cnt,approx,.018*peri,true);
-    if(approx.rows===4&&cv.isContourConvex(approx)){
-     const area=Math.abs(cv.contourArea(approx)),pageArea=work.width*work.height;
-     if(area>pageArea*.008&&area<pageArea*.88){
-      const mr=cv.minAreaRect(cnt),rw=mr.size.width,rh=mr.size.height,ratio=Math.max(rw,rh)/Math.max(1,Math.min(rw,rh));
-      if(ratio>=1.12&&ratio<=2.25){
-       const rectangularity=area/Math.max(1,rw*rh);
-       const ratioFit=Math.max(Math.exp(-Math.abs(ratio-1.42)*1.7),Math.exp(-Math.abs(ratio-1.586)*2.0));
-       const pts=[];for(let j=0;j<4;j++)pts.push({x:approx.intAt(j,0),y:approx.intAt(j,1)});
-       const margin=Math.min(...pts.map(p=>Math.min(p.x,p.y,work.width-p.x,work.height-p.y)));
-       const borderPenalty=margin<work.width*.012?.72:1;
-       const score=Math.sqrt(area/pageArea)*ratioFit*Math.min(1,rectangularity)*borderPenalty;
-       if(score>bestScore){bestScore=score;best=orderQuad(pts).map(p=>({x:p.x/detectScale,y:p.y/detectScale}))}
-      }
+    const cnt=contours.get(i),area=Math.abs(cv.contourArea(cnt)),pageArea=work.width*work.height,peri=cv.arcLength(cnt,true),approx=new cv.Mat();
+    cv.approxPolyDP(cnt,approx,.025*peri,true);
+    if(area>pageArea*.0012&&area<pageArea*.72){
+     const mr=cv.minAreaRect(cnt),rw=mr.size.width,rh=mr.size.height,ratio=Math.max(rw,rh)/Math.max(1,Math.min(rw,rh));
+     if(ratio>=1.18&&ratio<=2.05){
+      const boxArea=Math.max(1,rw*rh),rectangularity=Math.min(1,area/boxArea);
+      const ratioFit=Math.exp(-Math.abs(ratio-1.586)*2.8);
+      const pts=[];
+      if(approx.rows===4&&cv.isContourConvex(approx)){for(let j=0;j<4;j++)pts.push({x:approx.intAt(j,0),y:approx.intAt(j,1)})}
+      else {const b=cv.boundingRect(cnt);pts.push({x:b.x,y:b.y},{x:b.x+b.width,y:b.y},{x:b.x+b.width,y:b.y+b.height},{x:b.x,y:b.y+b.height})}
+      const margin=Math.min(...pts.map(p=>Math.min(p.x,p.y,work.width-p.x,work.height-p.y)));
+      const borderPenalty=margin<Math.min(work.width,work.height)*.008?.25:1;
+      const areaScore=Math.pow(area/pageArea,.32);
+      const score=ratioFit*Math.sqrt(Math.max(.05,rectangularity))*areaScore*borderPenalty;
+      if(score>bestScore){bestScore=score;best=orderQuad(pts).map(p=>({x:p.x/detectScale,y:p.y/detectScale}))}
      }
     }
     cnt.delete();approx.delete();
@@ -81,7 +82,7 @@ $('autoDetect').onclick=async()=>{
    contourInput.delete();contours.delete();hierarchy.delete();
   }
   src.delete();gray.delete();blur.delete();edges.delete();adaptive.delete();kernel.delete();
-  if(!best){say('Не удалось уверенно определить границы. Попробуй приблизить документ, положить его на контрастный фон или выделить вручную.');return}
+  if(!best){say('Не удалось уверенно определить контур. ID-карта может сливаться с фоном скана. Попробуй контрастный фон или выдели её вручную.');return}
   detectedQuad=best;rect={x:Math.min(...best.map(p=>p.x)),y:Math.min(...best.map(p=>p.y)),w:Math.max(...best.map(p=>p.x))-Math.min(...best.map(p=>p.x)),h:Math.max(...best.map(p=>p.y))-Math.min(...best.map(p=>p.y))};
   detectedCanvas=null;sel.style.display='none';drawDetectedQuad();update();
   say('Документ найден. Проверь синие угловые маркеры; при необходимости поправь их и нажми «Добавить выделенную сторону».');
@@ -94,7 +95,7 @@ detectOverlay.addEventListener('pointerup',()=>{if(cornerDrag>=0){cornerDrag=-1;
 $('angle').addEventListener('input',e=>{angle=Number(e.target.value);$('angleValue').textContent=angle.toFixed(1)+'°';paintCropPreview()});
 $('resetAngle').onclick=()=>{angle=0;$('angle').value='0';$('angleValue').textContent='0.0°';paintCropPreview()};
 $('addWholePage').onclick=()=>{if(!pdf)return;items.push({id:'copy-'+crypto.randomUUID(),kind:'source',sourceIndex:current-1,canvas:pages[current-1].thumb,label:'Доп. страница '+current});renderQueue();say('Страница '+current+' добавлена в конец итогового PDF целиком.')};
-$('addCrop').onclick=()=>{if(!rect)return;if(fragments.length>=2){say('Уже выбраны две стороны. Создай лист A4 или сбрось выбор.');return}fragments.push({canvas:detectedCanvas||(detectedQuad?warpDetected():cropCanvas()),page:current,angle:detectedQuad?0:angle});rect=null;detectedQuad=null;detectedCanvas=null;detectOverlay.style.display='none';sel.style.display='none';angle=0;$('angle').value='0';$('angleValue').textContent='0.0°';paintCropPreview();say('Сторона '+fragments.length+' добавлена. '+(fragments.length===1?'Теперь выбери вторую сторону.':'Обе стороны выбраны — можно создавать лист A4.'));update()};
+$('addCrop').onclick=async()=>{if(!rect)return;if(fragments.length>=2){say('Уже выбраны две стороны. Создай лист A4 или сбрось выбор.');return}try{say('Получаю фрагмент в исходном высоком разрешении…');const hi=await renderPageHighQuality(current-1);let crop;if(detectedQuad)crop=warpDetected(hi.canvas,hi.scale);else{const old=main;const c=document.createElement('canvas');c.width=hi.canvas.width;c.height=hi.canvas.height;c.getContext('2d').drawImage(hi.canvas,0,0);crop=rotateCrop(rawCrop(c,hi.scale),angle)}if(!crop)throw new Error('Не удалось получить фрагмент');fragments.push({canvas:crop,page:current,angle:detectedQuad?0:angle});rect=null;detectedQuad=null;detectedCanvas=null;detectOverlay.style.display='none';sel.style.display='none';angle=0;$('angle').value='0';$('angleValue').textContent='0.0°';paintCropPreview();say('Сторона '+fragments.length+' добавлена в высоком разрешении. '+(fragments.length===1?'Теперь выбери вторую сторону.':'Обе стороны выбраны — можно создавать лист A4.'));update()}catch(e){say('Ошибка обработки фрагмента: '+e.message)}};
 $('clearSel').onclick=()=>{rect=null;detectedQuad=null;detectedCanvas=null;detectOverlay.style.display='none';sel.style.display='none';angle=0;$('angle').value='0';$('angleValue').textContent='0.0°';paintCropPreview();update()};
 $('makeSheet').onclick=()=>{if(fragments.length!==2)return;const c=document.createElement('canvas');c.width=2480;c.height=3508;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);const margin=180,gap=96,boxW=c.width-margin*2,boxH=(c.height-margin*2-gap)/2;fragments.forEach((f,i)=>{const im=f.canvas,ratio=Math.min(boxW/im.width,boxH/im.height),w=im.width*ratio,h=im.height*ratio;g.drawImage(im,margin+(boxW-w)/2,margin+i*(boxH+gap)+(boxH-h)/2,w,h)});items.push({id:'sheet-'+crypto.randomUUID(),kind:'sheet',canvas:c,label:'Документ · страницы '+fragments[0].page+' + '+fragments[1].page});fragments=[];renderQueue();update();say('Готово: две стороны размещены на одном листе A4 в разрешении 300 DPI — первая сверху, вторая снизу. Удали исходные страницы паспорта из списка справа.')};
 function renderQueue(){$('queue').innerHTML='';$('count').textContent='('+items.length+')';$('export').disabled=!items.length;if(!items.length){$('queue').innerHTML='<div class="empty">Итоговый документ пуст.</div>';return}items.forEach((it,i)=>{const d=document.createElement('div');d.className='item';d.draggable=true;d.addEventListener('dragstart',e=>{dragItem=i;d.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',String(i))});d.addEventListener('dragend',()=>{d.classList.remove('dragging');document.querySelectorAll('.drag-over').forEach(x=>x.classList.remove('drag-over'))});d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('drag-over');e.dataTransfer.dropEffect='move'});d.addEventListener('dragleave',()=>d.classList.remove('drag-over'));d.addEventListener('drop',e=>{e.preventDefault();d.classList.remove('drag-over');const from=dragItem;if(from===null||from===i)return;const moved=items.splice(from,1)[0];items.splice(i,0,moved);dragItem=null;renderQueue()});d.append(cloneCanvas(it.canvas));const info=document.createElement('div'),title=document.createElement('strong');title.textContent=(i+1)+'. '+it.label;info.append(title);const sm=document.createElement('small');sm.textContent=it.kind==='sheet'?'Один лист A4 · две стороны документа':'Оригинальная страница PDF';info.append(sm);const acts=document.createElement('div');acts.className='actions';[['⠿ Перетащить',()=>{}],['Удалить',()=>{items.splice(i,1);renderQueue()}]].forEach(([t,fn],j)=>{const b=document.createElement('button');b.textContent=t;if(j===1)b.className='del';b.onclick=fn;acts.append(b)});info.append(acts);d.append(info);$('queue').append(d)})}
